@@ -1,0 +1,23 @@
+capital_eur: 10000
+risk_per_trade_pct: 0.5
+max_positions_green: 4
+max_positions_orange: 1
+max_new_candidates: 5
+
+universe:
+  max_symbols: 5000
+  min_price: 5
+  min_avg_dollar_volume: 5000000
+
+strategy:
+  sma50_slope_days: 20
+  sma200_slope_days: 20
+  max_distance_from_52w_high_pct: 25
+  max_distance_above_pivot_pct: 1.5
+  max_stop_distance_pct: 8
+  min_stop_distance_pct: 3
+  pivot_lookback_days: 60
+  pivot_exclude_recent_days: 5
+
+schedule:
+  timezone: Europe/Paris

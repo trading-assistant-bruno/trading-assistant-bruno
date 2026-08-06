@@ -1,0 +1,6 @@
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.65
+requests>=2.32
+PyYAML>=6.0
+jinja2>=3.1
