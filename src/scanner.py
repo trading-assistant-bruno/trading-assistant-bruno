@@ -16,92 +16,63 @@ import yfinance as yf
 from jinja2 import Template
 
 
-# ─────────────────────────────────────
-# CONFIGURATION
-# ─────────────────────────────────────
-
 ROOT = Path(__file__).resolve().parents[1]
-
-CONFIG = yaml.safe_load(
-    (ROOT / "config.yml").read_text(encoding="utf-8")
-)
-
+CONFIG = yaml.safe_load((ROOT / "config.yml").read_text(encoding="utf-8"))
 DOCS = ROOT / "docs"
 DATA = ROOT / "data"
-
 DOCS.mkdir(exist_ok=True)
 DATA.mkdir(exist_ok=True)
 
 
-# ─────────────────────────────────────
-# STRUCTURE D'UNE ACTION CANDIDATE
-# ─────────────────────────────────────
+def cfg(section: str, key: str, default):
+    return CONFIG.get(section, {}).get(key, default)
+
 
 @dataclass
 class Candidate:
     ticker: str
     close: float
+    status: str
+    score: float
     pivot: float
-    entry: float
+    entry_trigger: float
+    buy_zone_max: float
+    extension_vs_pivot_pct: float
     stop: float
     stop_pct: float
     shares: int
-    position_value: float
+    position_value_usd: float
+    risk_usd: float
     risk_eur: float
-    score: float
+    eurusd: float
+    perf_3m_pct: float
+    perf_6m_pct: float
+    perf_12m_pct: float
+    rs_6m_vs_spy_pct: float
+    rs_12m_vs_spy_pct: float
     distance_52w_high_pct: float
     avg_dollar_volume: float
+    volume_ratio: float
+    contraction: bool
     reasons: list[str]
 
 
-# ─────────────────────────────────────
-# UNIVERS D'ACTIONS
-# ─────────────────────────────────────
-
 def download_universe() -> list[str]:
-    """
-    Télécharge les titres cotés aux États-Unis.
-
-    Exclut :
-    - ETF
-    - warrants
-    - rights
-    - units
-    - preferred shares
-    - obligations
-    - closed-end funds
-    - titres de test Nasdaq
-    """
-
     urls = [
         "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
         "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
     ]
 
     symbols: list[str] = []
-
     banned_terms = (
-        "warrant",
-        "warrants",
-        "rights",
-        "unit",
-        "units",
-        "preferred",
-        "bond",
-        "bonds",
-        "debenture",
-        "notes",
-        "closed-end fund",
+        "warrant", "warrants", "rights", "unit", "units", "preferred",
+        "bond", "bonds", "debenture", "notes", "closed-end fund",
+        "depositary shares",
     )
 
     for url in urls:
-
         try:
-
-            df = pd.read_csv(
-                url,
-                sep="|"
-            )
+            df = pd.read_csv(url, sep="|")
 
             if "Symbol" in df.columns:
                 symbol_col = "Symbol"
@@ -110,148 +81,52 @@ def download_universe() -> list[str]:
             else:
                 continue
 
-            # ──────────────────────────
-            # SUPPRESSION DES ETF
-            # ──────────────────────────
-
             if "ETF" in df.columns:
-
-                df = df[
-                    df["ETF"]
-                    .astype(str)
-                    .str.upper()
-                    .eq("N")
-                ]
-
-            # ──────────────────────────
-            # SUPPRESSION DES TITRES TEST
-            # ──────────────────────────
+                df = df[df["ETF"].astype(str).str.upper().eq("N")]
 
             if "Test Issue" in df.columns:
-
-                df = df[
-                    df["Test Issue"]
-                    .astype(str)
-                    .str.upper()
-                    .eq("N")
-                ]
-
-            # ──────────────────────────
-            # SUPPRESSION AUTRES PRODUITS
-            # ──────────────────────────
+                df = df[df["Test Issue"].astype(str).str.upper().eq("N")]
 
             if "Security Name" in df.columns:
-
-                security_names = (
-                    df["Security Name"]
-                    .astype(str)
-                    .str.lower()
-                )
-
-                mask = ~security_names.apply(
-                    lambda name: any(
-                        term in name
-                        for term in banned_terms
-                    )
-                )
-
+                names = df["Security Name"].astype(str).str.lower()
+                mask = ~names.apply(lambda name: any(term in name for term in banned_terms))
                 df = df[mask]
 
-            # ──────────────────────────
-            # TICKERS
-            # ──────────────────────────
-
             for raw in df[symbol_col].dropna().astype(str):
-
-                ticker = (
-                    raw
-                    .strip()
-                    .replace(".", "-")
-                )
-
+                ticker = raw.strip().replace(".", "-")
                 if not ticker:
                     continue
-
                 if "File Creation Time" in ticker:
                     continue
-
-                if "$" in ticker:
+                if any(char in ticker for char in ("$", "^")):
                     continue
-
-                if "^" in ticker:
-                    continue
-
                 if len(ticker) > 6:
                     continue
-
                 symbols.append(ticker)
 
         except Exception as exc:
+            print(f"Universe source failed: {url}: {exc}")
 
-            print(
-                f"Universe source failed: "
-                f"{url}: {exc}"
-            )
-
-    # Supprime les doublons
     symbols = sorted(set(symbols))
-
-    max_symbols = int(
-        CONFIG["universe"]["max_symbols"]
-    )
-
+    max_symbols = int(CONFIG.get("universe", {}).get("max_symbols", 5000))
     if max_symbols > 0:
         symbols = symbols[:max_symbols]
 
-    print(
-        f"Universe after filtering: "
-        f"{len(symbols)} securities"
-    )
-
+    print(f"Universe after filtering: {len(symbols)}")
     return symbols
 
 
-# ─────────────────────────────────────
-# CRÉATION DE LOTS
-# ─────────────────────────────────────
-
-def batched(
-    items: list[str],
-    size: int
-) -> Iterable[list[str]]:
-
-    for i in range(
-        0,
-        len(items),
-        size
-    ):
+def batched(items: list[str], size: int) -> Iterable[list[str]]:
+    for i in range(0, len(items), size):
         yield items[i:i + size]
 
 
-# ─────────────────────────────────────
-# TÉLÉCHARGEMENT DES PRIX
-# ─────────────────────────────────────
-
-def fetch_prices(
-    symbols: list[str],
-    period: str = "2y"
-) -> dict[str, pd.DataFrame]:
-
+def fetch_prices(symbols: list[str], period: str = "2y") -> dict[str, pd.DataFrame]:
     output: dict[str, pd.DataFrame] = {}
 
-    for batch_number, batch in enumerate(
-        batched(symbols, 150),
-        start=1
-    ):
-
-        print(
-            f"Downloading batch "
-            f"{batch_number}: "
-            f"{len(batch)} symbols"
-        )
-
+    for batch_no, batch in enumerate(batched(symbols, 150), start=1):
+        print(f"Downloading batch {batch_no}: {len(batch)} symbols")
         try:
-
             data = yf.download(
                 tickers=batch,
                 period=period,
@@ -264,1396 +139,557 @@ def fetch_prices(
             )
 
             if len(batch) == 1:
-
                 ticker = batch[0]
-
                 if not data.empty:
-                    output[ticker] = (
-                        data.dropna(how="all")
-                    )
-
+                    output[ticker] = data.dropna(how="all")
             else:
-
                 for ticker in batch:
-
                     try:
-
-                        frame = (
-                            data[ticker]
-                            .dropna(how="all")
-                        )
-
+                        frame = data[ticker].dropna(how="all")
                         if not frame.empty:
                             output[ticker] = frame
-
                     except Exception:
                         continue
 
         except Exception as exc:
+            print(f"Batch failed: {exc}")
 
-            print(
-                f"Batch failed: {exc}"
-            )
-
-        # Petite pause pour limiter les problèmes Yahoo
-        time.sleep(0.25)
+        time.sleep(0.20)
 
     return output
 
 
-# ─────────────────────────────────────
-# INDICATEURS TECHNIQUES
-# ─────────────────────────────────────
-
-def add_indicators(
-    df: pd.DataFrame
-) -> pd.DataFrame:
-
+def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
-
-    x.columns = [
-        str(column).title()
-        for column in x.columns
-    ]
-
-    required = {
-        "Open",
-        "High",
-        "Low",
-        "Close",
-        "Volume",
-    }
-
-    if not required.issubset(
-        set(x.columns)
-    ):
-        raise ValueError(
-            "Missing OHLCV columns"
-        )
-
-    # Moyennes mobiles
-    for period in (
-        21,
-        50,
-        150,
-        200
-    ):
-
-        x[f"SMA{period}"] = (
-            x["Close"]
-            .rolling(period)
-            .mean()
-        )
-
-    # Plus haut 52 semaines
-    x["High52"] = (
-        x["High"]
-        .rolling(252)
-        .max()
-    )
-
-    # Liquidité moyenne
-    x["AvgDollarVol20"] = (
-        (
-            x["Close"]
-            * x["Volume"]
-        )
-        .rolling(20)
-        .mean()
-    )
-
+    x.columns = [str(c).title() for c in x.columns]
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    if not required.issubset(set(x.columns)):
+        raise ValueError("Missing OHLCV columns")
     return x
 
 
-# ─────────────────────────────────────
-# RÉGIME DE MARCHÉ
-# ─────────────────────────────────────
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    x = normalize_ohlcv(df)
+
+    for n in (21, 50, 150, 200):
+        x[f"SMA{n}"] = x["Close"].rolling(n).mean()
+
+    x["High52"] = x["High"].rolling(252).max()
+    x["AvgDollarVol20"] = (x["Close"] * x["Volume"]).rolling(20).mean()
+    return x
+
+
+def pct_return(close: pd.Series, sessions: int) -> float:
+    if len(close) <= sessions:
+        return float("nan")
+    old = float(close.iloc[-1 - sessions])
+    new = float(close.iloc[-1])
+    if old <= 0:
+        return float("nan")
+    return (new / old - 1) * 100
+
+
+def get_eurusd() -> float:
+    fallback = float(CONFIG.get("fx", {}).get("eurusd_fallback", 1.10))
+    try:
+        data = yf.download(
+            "EURUSD=X",
+            period="10d",
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            timeout=20,
+        )
+        if data.empty:
+            return fallback
+
+        close = data["Close"]
+        if isinstance(close, pd.DataFrame):
+            value = float(close.iloc[-1, 0])
+        else:
+            value = float(close.iloc[-1])
+
+        return value if value > 0 else fallback
+    except Exception as exc:
+        print(f"EURUSD failed, using fallback {fallback}: {exc}")
+        return fallback
+
 
 def market_regime() -> dict:
-
-    tickers = [
-        "QQQ",
-        "SPY",
-        "^IXIC",
-        "^VIX",
-    ]
-
-    frames = fetch_prices(
-        tickers,
-        period="1y"
-    )
+    tickers = ["QQQ", "SPY", "^IXIC", "^VIX"]
+    frames = fetch_prices(tickers, period="1y")
 
     details = {}
-
     positives = 0
 
-    for ticker in [
-        "QQQ",
-        "SPY",
-        "^IXIC",
-    ]:
-
-        df = add_indicators(
-            frames[ticker]
-        )
-
+    for ticker in ["QQQ", "SPY", "^IXIC"]:
+        df = add_indicators(frames[ticker])
         last = df.iloc[-1]
+        slope_days = int(cfg("strategy", "sma50_slope_days", 20))
 
-        slope_days = int(
-            CONFIG["strategy"][
-                "sma50_slope_days"
-            ]
-        )
+        sma50_rising = bool(last["SMA50"] > df["SMA50"].iloc[-1 - slope_days])
+        above_50 = bool(last["Close"] > last["SMA50"])
+        above_200 = bool(last["Close"] > last["SMA200"])
 
-        sma50_rising = bool(
-            last["SMA50"]
-            >
-            df["SMA50"].iloc[
-                -1 - slope_days
-            ]
-        )
-
-        above_50 = bool(
-            last["Close"]
-            >
-            last["SMA50"]
-        )
-
-        above_200 = bool(
-            last["Close"]
-            >
-            last["SMA200"]
-        )
-
-        score = sum(
-            [
-                above_50,
-                above_200,
-                sma50_rising,
-            ]
-        )
-
-        positives += score
+        positives += sum([above_50, above_200, sma50_rising])
 
         details[ticker] = {
-
-            "close": round(
-                float(last["Close"]),
-                2
-            ),
-
-            "above_sma50":
-                above_50,
-
-            "above_sma200":
-                above_200,
-
-            "sma50_rising":
-                sma50_rising,
+            "close": round(float(last["Close"]), 2),
+            "above_sma50": above_50,
+            "above_sma200": above_200,
+            "sma50_rising": sma50_rising,
         }
 
-    # ──────────────────────────────
-    # VIX
-    # ──────────────────────────────
-
-    vix = add_indicators(
-        frames["^VIX"]
-    )
-
-    vix_close = float(
-        vix.iloc[-1]["Close"]
-    )
-
-    vix_ok = (
-        vix_close < 25
-    )
-
-    positives += int(
-        vix_ok
-    )
+    vix = add_indicators(frames["^VIX"])
+    vix_close = float(vix.iloc[-1]["Close"])
+    vix_limit = float(cfg("market", "vix_green_max", 25))
+    vix_ok = vix_close < vix_limit
+    positives += int(vix_ok)
 
     details["VIX"] = {
-
-        "close": round(
-            vix_close,
-            2
-        ),
-
-        "below_25":
-            vix_ok,
+        "close": round(vix_close, 2),
+        "below_limit": vix_ok,
+        "limit": vix_limit,
     }
-
-    # 10 critères binaires
-    # 3 indices x 3 conditions
-    # + VIX
 
     if positives >= 9:
-
         color = "VERT"
-
     elif positives >= 6:
-
         color = "ORANGE"
-
     else:
-
         color = "ROUGE"
 
+    allowed = {
+        "VERT": int(CONFIG.get("max_positions_green", 4)),
+        "ORANGE": int(CONFIG.get("max_positions_orange", 1)),
+        "ROUGE": 0,
+    }[color]
+
     return {
-
-        "color":
-            color,
-
-        "score":
-            positives * 10,
-
-        "details":
-            details,
-
-        "new_positions_allowed": {
-            "VERT": 4,
-            "ORANGE": 1,
-            "ROUGE": 0,
-        }[color],
+        "color": color,
+        "score": positives * 10,
+        "details": details,
+        "new_positions_allowed": allowed,
     }
 
 
-# ─────────────────────────────────────
-# ANALYSE D'UNE ACTION
-# ─────────────────────────────────────
+def benchmark_returns() -> dict:
+    data = fetch_prices(["SPY"], period="2y")["SPY"]
+    df = normalize_ohlcv(data)
+    return {
+        "perf_6m": pct_return(df["Close"], 126),
+        "perf_12m": pct_return(df["Close"], 252),
+    }
+
+
+def relative_return(stock_pct: float, benchmark_pct: float) -> float:
+    if pd.isna(stock_pct) or pd.isna(benchmark_pct):
+        return float("nan")
+    stock_mult = 1 + stock_pct / 100
+    bench_mult = 1 + benchmark_pct / 100
+    if bench_mult <= 0:
+        return float("nan")
+    return (stock_mult / bench_mult - 1) * 100
+
+
+def determine_status(close: float, pivot: float, entry: float, buy_zone_max: float) -> str:
+    watch_below_pct = float(cfg("strategy", "watchlist_below_pivot_pct", 3.0))
+
+    if entry <= close <= buy_zone_max:
+        return "ACHAT POSSIBLE"
+    if close > buy_zone_max:
+        return "TROP ETENDU"
+
+    distance_below = (pivot - close) / pivot * 100
+    if 0 <= distance_below <= watch_below_pct:
+        return "ATTENDRE CASSURE"
+
+    return "WATCHLIST"
+
 
 def analyze_symbol(
     ticker: str,
-    raw: pd.DataFrame
-) -> Candidate | None:
+    raw: pd.DataFrame,
+    spy_returns: dict,
+    eurusd: float,
+) -> tuple[Candidate | None, str]:
 
     try:
-
         df = add_indicators(raw)
 
-        # Il faut assez d'historique
-        # pour calculer le plus haut 52 semaines
-
         if len(df) < 260:
-            return None
+            return None, "historique"
 
         df = df.dropna()
-
         if df.empty:
-            return None
+            return None, "historique"
 
         last = df.iloc[-1]
+        close = float(last["Close"])
 
-        close = float(
-            last["Close"]
-        )
+        if close < float(cfg("universe", "min_price", 5)):
+            return None, "prix"
 
-        cfg_u = CONFIG["universe"]
-        cfg_s = CONFIG["strategy"]
+        avg_dollar_vol = float(last["AvgDollarVol20"])
+        if avg_dollar_vol < float(cfg("universe", "min_avg_dollar_volume", 5_000_000)):
+            return None, "liquidite"
 
-        # ──────────────────────────
-        # PRIX MINIMUM
-        # ──────────────────────────
+        if not (close > last["SMA50"] > last["SMA150"] > last["SMA200"]):
+            return None, "trend_template"
 
-        if close < float(
-            cfg_u["min_price"]
-        ):
-            return None
+        slope_days = int(cfg("strategy", "sma200_slope_days", 20))
+        if float(last["SMA200"]) <= float(df["SMA200"].iloc[-1 - slope_days]):
+            return None, "sma200"
 
-        # ──────────────────────────
-        # LIQUIDITÉ
-        # ──────────────────────────
+        high52 = float(last["High52"])
+        distance_high = (high52 - close) / high52 * 100
+        if distance_high > float(cfg("strategy", "max_distance_from_52w_high_pct", 25)):
+            return None, "52w_high"
 
-        avg_dollar_vol = float(
-            last["AvgDollarVol20"]
-        )
+        perf_3m = pct_return(df["Close"], 63)
+        perf_6m = pct_return(df["Close"], 126)
+        perf_12m = pct_return(df["Close"], 252)
 
-        if avg_dollar_vol < float(
-            cfg_u["min_avg_dollar_volume"]
-        ):
-            return None
+        if pd.isna(perf_6m) or perf_6m < float(cfg("strategy", "min_perf_6m_pct", 0)):
+            return None, "momentum"
 
-        # ──────────────────────────
-        # TREND TEMPLATE
-        # ──────────────────────────
+        rs_6m = relative_return(perf_6m, spy_returns["perf_6m"])
+        rs_12m = relative_return(perf_12m, spy_returns["perf_12m"])
 
-        if not (
-            close
-            >
-            last["SMA50"]
-            >
-            last["SMA150"]
-            >
-            last["SMA200"]
-        ):
-            return None
+        if pd.isna(rs_6m) or rs_6m < float(cfg("strategy", "min_rs_6m_vs_spy_pct", 0)):
+            return None, "relative_strength"
 
-        # ──────────────────────────
-        # MM200 MONTANTE
-        # ──────────────────────────
+        lookback = int(cfg("strategy", "pivot_lookback_days", 60))
+        exclude_recent = int(cfg("strategy", "pivot_exclude_recent_days", 5))
 
-        slope_days = int(
-            cfg_s[
-                "sma200_slope_days"
-            ]
-        )
-
-        if float(
-            last["SMA200"]
-        ) <= float(
-            df["SMA200"].iloc[
-                -1 - slope_days
-            ]
-        ):
-            return None
-
-        # ──────────────────────────
-        # DISTANCE PLUS HAUT 52 SEMAINES
-        # ──────────────────────────
-
-        high52 = float(
-            last["High52"]
-        )
-
-        distance_high = (
-            (
-                high52
-                - close
-            )
-            / high52
-            * 100
-        )
-
-        if distance_high > float(
-            cfg_s[
-                "max_distance_from_52w_high_pct"
-            ]
-        ):
-            return None
-
-        # ──────────────────────────
-        # PIVOT MÉCANIQUE
-        # ──────────────────────────
-
-        lookback = int(
-            cfg_s[
-                "pivot_lookback_days"
-            ]
-        )
-
-        exclude_recent = int(
-            cfg_s[
-                "pivot_exclude_recent_days"
-            ]
-        )
-
-        pivot_window = (
-            df["High"]
-            .iloc[
-                -lookback:
-                -exclude_recent
-            ]
-        )
-
+        pivot_window = df["High"].iloc[-lookback:-exclude_recent]
         if pivot_window.empty:
-            return None
+            return None, "pivot"
 
-        pivot = float(
-            pivot_window.max()
-        )
+        pivot = float(pivot_window.max())
+        entry_buffer_pct = float(cfg("strategy", "entry_buffer_pct", 0.10))
+        entry = pivot * (1 + entry_buffer_pct / 100)
 
-        # Entrée légèrement au-dessus du pivot
-        entry = (
-            pivot * 1.001
-        )
+        buy_zone_pct = float(cfg("strategy", "max_distance_above_pivot_pct", 1.5))
+        buy_zone_max = pivot * (1 + buy_zone_pct / 100)
 
-        distance_above_pivot = (
-            (
-                close
-                - pivot
-            )
-            / pivot
-            * 100
-        )
+        extension_vs_pivot = (close - pivot) / pivot * 100
+        status = determine_status(close, pivot, entry, buy_zone_max)
 
-        if distance_above_pivot > float(
-            cfg_s[
-                "max_distance_above_pivot_pct"
-            ]
-        ):
-            return None
+        recent_swing_low = float(df["Low"].iloc[-10:].min()) * 0.995
+        min_stop_pct = float(cfg("strategy", "min_stop_distance_pct", 3))
+        max_stop_pct = float(cfg("strategy", "max_stop_distance_pct", 8))
 
-        # ──────────────────────────
-        # STOP
-        # ──────────────────────────
+        min_stop = entry * (1 - min_stop_pct / 100)
+        max_stop = entry * (1 - max_stop_pct / 100)
 
-        recent_swing_low = float(
-            df["Low"]
-            .iloc[-10:]
-            .min()
-        ) * 0.995
+        stop = min(min_stop, recent_swing_low)
+        stop = max(stop, max_stop)
 
-        min_stop = (
-            entry
-            *
-            (
-                1
-                -
-                float(
-                    cfg_s[
-                        "min_stop_distance_pct"
-                    ]
-                )
-                / 100
-            )
-        )
+        stop_pct = (entry - stop) / entry * 100
+        if stop_pct <= 0 or stop_pct > max_stop_pct + 1e-6:
+            return None, "stop"
 
-        max_stop = (
-            entry
-            *
-            (
-                1
-                -
-                float(
-                    cfg_s[
-                        "max_stop_distance_pct"
-                    ]
-                )
-                / 100
-            )
-        )
+        capital_eur = float(CONFIG.get("capital_eur", 10_000))
+        risk_pct = float(CONFIG.get("risk_per_trade_pct", 0.5))
+        max_risk_eur = capital_eur * risk_pct / 100
+        max_risk_usd = max_risk_eur * eurusd
 
-        # Stop sous le récent plus bas,
-        # mais limité à la bande 3-8 %
+        risk_per_share_usd = entry - stop
+        if risk_per_share_usd <= 0:
+            return None, "stop"
 
-        stop = min(
-            min_stop,
-            recent_swing_low
-        )
-
-        stop = max(
-            stop,
-            max_stop
-        )
-
-        stop_pct = (
-            (
-                entry
-                - stop
-            )
-            / entry
-            * 100
-        )
-
-        if stop_pct <= 0:
-            return None
-
-        if stop_pct > float(
-            cfg_s[
-                "max_stop_distance_pct"
-            ]
-        ):
-            return None
-
-        # ──────────────────────────
-        # TAILLE DE POSITION
-        # ──────────────────────────
-
-        capital = float(
-            CONFIG["capital_eur"]
-        )
-
-        risk_eur = (
-            capital
-            *
-            float(
-                CONFIG[
-                    "risk_per_trade_pct"
-                ]
-            )
-            / 100
-        )
-
-        risk_per_share = (
-            entry
-            - stop
-        )
-
-        if risk_per_share <= 0:
-            return None
-
-        shares = max(
-            0,
-            math.floor(
-                risk_eur
-                /
-                risk_per_share
-            )
-        )
-
+        shares = math.floor(max_risk_usd / risk_per_share_usd)
         if shares < 1:
-            return None
+            return None, "taille"
 
-        position_value = (
-            shares
-            * entry
-        )
+        risk_usd = shares * risk_per_share_usd
+        actual_risk_eur = risk_usd / eurusd
+        position_value_usd = shares * entry
 
-        # ──────────────────────────
-        # VOLUME
-        # ──────────────────────────
+        avg_vol = float(df["Volume"].iloc[-21:-1].mean())
+        volume_ratio = float(last["Volume"] / max(avg_vol, 1))
 
-        average_volume = (
-            df["Volume"]
-            .iloc[-21:-1]
-            .mean()
-        )
+        volatility_now = float(((df["High"].iloc[-10:] - df["Low"].iloc[-10:]).mean()) / close)
+        volatility_prev = float(((df["High"].iloc[-30:-10] - df["Low"].iloc[-30:-10]).mean()) / close)
+        contraction = volatility_now < volatility_prev
 
-        volume_ratio = float(
-            last["Volume"]
-            /
-            max(
-                average_volume,
-                1
-            )
-        )
+        score = 40.0
+        score += max(0, min(15, perf_6m / 4))
+        score += max(0, min(10, perf_12m / 10))
+        score += max(0, min(15, rs_6m / 2))
+        score += max(0, 10 - distance_high * 0.4)
 
-        # ──────────────────────────
-        # CONTRACTION VOLATILITÉ
-        # ──────────────────────────
+        if contraction:
+            score += 5
+        if volume_ratio > 1.2:
+            score += 5
 
-        volatility_now = float(
-
-            (
-                df["High"]
-                .iloc[-10:]
-                -
-                df["Low"]
-                .iloc[-10:]
-            )
-            .mean()
-            /
-            close
-        )
-
-        volatility_previous = float(
-
-            (
-                df["High"]
-                .iloc[-30:-10]
-                -
-                df["Low"]
-                .iloc[-30:-10]
-            )
-            .mean()
-            /
-            close
-        )
-
-        contraction = (
-            volatility_now
-            <
-            volatility_previous
-        )
-
-        # ──────────────────────────
-        # SCORE
-        # ──────────────────────────
-
-        score = 55.0
+        score = min(100, round(score, 1))
 
         reasons = [
-
             "Cours > MM50 > MM150 > MM200",
-
             "MM200 montante",
-
-            (
-                f"À {distance_high:.1f}% "
-                f"du plus haut 52 semaines"
-            ),
+            f"Performance 6 mois : {perf_6m:.1f}%",
+            f"RS 6 mois vs SPY : {rs_6m:+.1f}%",
+            f"À {distance_high:.1f}% du plus haut 52 semaines",
         ]
 
-        # Proximité du plus haut annuel
-        score += max(
-            0,
-            15
-            -
-            distance_high
-            * 0.6
-        )
-
-        # Contraction
         if contraction:
-
-            score += 12
-
-            reasons.append(
-                "Volatilité récente en contraction"
-            )
-
-        # Volume
+            reasons.append("Volatilité récente en contraction")
         if volume_ratio > 1.2:
-
-            score += 8
-
-            reasons.append(
-                "Volume supérieur à la moyenne"
-            )
-
-        # Proximité pivot
-        proximity = abs(
-            (
-                close
-                - pivot
-            )
-            /
-            pivot
-            * 100
-        )
-
-        score += max(
-            0,
-            10
-            -
-            proximity
-            * 2
-        )
-
-        score = min(
-            100,
-            round(
-                score,
-                1
-            )
-        )
+            reasons.append(f"Volume {volume_ratio:.1f}× la moyenne 20j")
 
         return Candidate(
-
-            ticker=
-                ticker,
-
-            close=
-                round(
-                    close,
-                    2
-                ),
-
-            pivot=
-                round(
-                    pivot,
-                    2
-                ),
-
-            entry=
-                round(
-                    entry,
-                    2
-                ),
-
-            stop=
-                round(
-                    stop,
-                    2
-                ),
-
-            stop_pct=
-                round(
-                    stop_pct,
-                    2
-                ),
-
-            shares=
-                shares,
-
-            position_value=
-                round(
-                    position_value,
-                    2
-                ),
-
-            risk_eur=
-                round(
-                    shares
-                    *
-                    (
-                        entry
-                        - stop
-                    ),
-                    2
-                ),
-
-            score=
-                score,
-
-            distance_52w_high_pct=
-                round(
-                    distance_high,
-                    2
-                ),
-
-            avg_dollar_volume=
-                round(
-                    avg_dollar_vol,
-                    0
-                ),
-
-            reasons=
-                reasons,
-        )
+            ticker=ticker,
+            close=round(close, 2),
+            status=status,
+            score=score,
+            pivot=round(pivot, 2),
+            entry_trigger=round(entry, 2),
+            buy_zone_max=round(buy_zone_max, 2),
+            extension_vs_pivot_pct=round(extension_vs_pivot, 2),
+            stop=round(stop, 2),
+            stop_pct=round(stop_pct, 2),
+            shares=shares,
+            position_value_usd=round(position_value_usd, 2),
+            risk_usd=round(risk_usd, 2),
+            risk_eur=round(actual_risk_eur, 2),
+            eurusd=round(eurusd, 4),
+            perf_3m_pct=round(perf_3m, 2),
+            perf_6m_pct=round(perf_6m, 2),
+            perf_12m_pct=round(perf_12m, 2),
+            rs_6m_vs_spy_pct=round(rs_6m, 2),
+            rs_12m_vs_spy_pct=round(rs_12m, 2),
+            distance_52w_high_pct=round(distance_high, 2),
+            avg_dollar_volume=round(avg_dollar_vol, 0),
+            volume_ratio=round(volume_ratio, 2),
+            contraction=contraction,
+            reasons=reasons,
+        ), "retenu"
 
     except Exception as exc:
+        print(f"{ticker}: analysis failed: {exc}")
+        return None, "erreur"
 
-        print(
-            f"{ticker}: analysis failed: {exc}"
-        )
-
-        return None
-
-
-# ─────────────────────────────────────
-# INTERFACE WEB
-# ─────────────────────────────────────
 
 HTML_TEMPLATE = """
 <!doctype html>
-
 <html lang="fr">
-
 <head>
-
 <meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
-<title>
-Trading Assistant Bruno
-</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Assistant Bruno</title>
 <style>
-
-body {
-    font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-
-    background:#f5f7fa;
-    margin:0;
-    color:#18212f;
-}
-
-main {
-    max-width:820px;
-    margin:auto;
-    padding:18px;
-}
-
-.card {
-    background:white;
-    border-radius:16px;
-    padding:18px;
-    margin:14px 0;
-    box-shadow:
-        0 3px 18px
-        #00000012;
-}
-
-h1 {
-    font-size:24px;
-}
-
-.regime {
-    font-size:28px;
-    font-weight:800;
-}
-
-.VERT {
-    color:#138a42;
-}
-
-.ORANGE {
-    color:#c46b00;
-}
-
-.ROUGE {
-    color:#c62828;
-}
-
-.grid {
-    display:grid;
-    grid-template-columns:
-        repeat(2,1fr);
-    gap:10px;
-}
-
-.metric {
-    background:#f4f6f8;
-    border-radius:10px;
-    padding:10px;
-}
-
-.ticker {
-    font-size:22px;
-    font-weight:800;
-}
-
-.score {
-    float:right;
-}
-
-.buy {
-    font-size:18px;
-    font-weight:700;
-}
-
-small {
-    color:#667085;
-}
-
-ul {
-    padding-left:20px;
-}
-
-@media(max-width:600px) {
-
-    .grid {
-        grid-template-columns:1fr;
-    }
-
-}
-
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;margin:0;color:#18212f}
+main{max-width:860px;margin:auto;padding:18px}
+.card{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 18px #00000012}
+h1{font-size:24px}.regime{font-size:28px;font-weight:800}
+.VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.metric{background:#f4f6f8;border-radius:10px;padding:10px}
+.ticker{font-size:22px;font-weight:800}.score{float:right}
+.status{font-size:18px;font-weight:800;margin-top:8px}
+small{color:#667085}ul{padding-left:20px}
+table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #eee}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
 </style>
-
 </head>
-
-<body>
-
-<main>
-
-<h1>
-Trading Assistant Bruno
-</h1>
+<body><main>
+<h1>Trading Assistant Bruno</h1>
 
 <div class="card">
-
-<div class="regime {{ regime.color }}">
-
-● Marché {{ regime.color }}
-
+<div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
+<p>Score de régime : {{ regime.score }}/100 — nouvelles positions autorisées : {{ regime.new_positions_allowed }}</p>
+<p>EUR/USD utilisé : {{ eurusd }}</p>
+<small>Calculé le {{ generated_at }}</small>
 </div>
 
-<p>
-
-Score de régime :
-{{ regime.score }}/100
-
-—
-
-Nouvelles positions autorisées :
-{{ regime.new_positions_allowed }}
-
-</p>
-
-<small>
-
-Calculé le
-{{ generated_at }}
-
-</small>
-
+<div class="card">
+<h2>Entonnoir du scan</h2>
+<table>
+{% for key, value in funnel.items() %}
+<tr><td>{{ key }}</td><td><b>{{ value }}</b></td></tr>
+{% endfor %}
+</table>
 </div>
-
 
 {% if regime.color == "ROUGE" %}
-
-<div class="card">
-
-<h2>
-Aucun nouvel achat
-</h2>
-
-<p>
-Le régime rouge bloque automatiquement
-les nouvelles positions.
-</p>
-
-</div>
-
+<div class="card"><h2>Aucun nouvel achat</h2><p>Le régime rouge bloque automatiquement les nouvelles positions.</p></div>
 {% endif %}
-
-
-{% if not candidates and regime.color != "ROUGE" %}
-
-<div class="card">
-
-<h2>
-Aucune configuration retenue
-</h2>
-
-<p>
-Aucune action ne respecte actuellement
-tous les critères du scanner.
-</p>
-
-</div>
-
-{% endif %}
-
 
 {% for c in candidates %}
-
 <div class="card">
-
-<div class="ticker">
-
-{{ loop.index }}.
-{{ c.ticker }}
-
-<span class="score">
-{{ c.score }}/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-{{ c.entry }} $
-
-</p>
+<div class="ticker">{{ loop.index }}. {{ c.ticker }} <span class="score">{{ c.score }}/100</span></div>
+<div class="status">{{ c.status }}</div>
+<p>Cours : <b>{{ c.close }} $</b> — pivot : <b>{{ c.pivot }} $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-{{ c.pivot }} $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>{{ c.entry_trigger }} $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>{{ c.buy_zone_max }} $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>{{ c.stop }} $</b> ({{ c.stop_pct }}%)</div>
+<div class="metric"><small>Taille</small><br><b>{{ c.shares }} actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>{{ c.risk_eur }} €</b></div>
+<div class="metric"><small>Position</small><br><b>{{ c.position_value_usd }} $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>{{ c.perf_6m_pct }}%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>{{ c.rs_6m_vs_spy_pct }}%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-{{ c.stop }} $
-</b>
-
-({{ c.stop_pct }}%)
-
+<ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+<p><a href="https://www.tradingview.com/chart/?symbol={{ c.ticker }}" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
-
-
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-{{ c.shares }} actions
-</b>
-
-</div>
-
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-{{ c.risk_eur }} €
-</b>
-
-</div>
-
-</div>
-
-
-<ul>
-
-{% for reason in c.reasons %}
-
-<li>
-{{ reason }}
-</li>
-
 {% endfor %}
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol={{ c.ticker }}"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
-</div>
-
-{% endfor %}
-
 
 <div class="card">
-
 <small>
-
-Prototype d'aide à la décision.
-
-Les niveaux sont calculés mécaniquement
-sur données quotidiennes et doivent être
-vérifiés avant tout ordre réel.
-
+Le score est un classement technique, pas une probabilité de gain.
+Cette version ne vérifie pas encore automatiquement les résultats d'entreprise ni la qualité visuelle VCP/flat base.
+Aucun ordre n'est envoyé au broker.
 </small>
-
 </div>
-
-</main>
-
-</body>
-
-</html>
+</main></body></html>
 """
 
 
-# ─────────────────────────────────────
-# TELEGRAM
-# ─────────────────────────────────────
-
-def send_telegram(
-    regime: dict,
-    candidates: list[Candidate]
-) -> None:
-
-    token = os.getenv(
-        "TELEGRAM_BOT_TOKEN"
-    )
-
-    chat_id = os.getenv(
-        "TELEGRAM_CHAT_ID"
-    )
+def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
-
-        print(
-            "Telegram secrets missing; "
-            "notification skipped."
-        )
-
+        print("Telegram secrets missing; notification skipped.")
         return
 
     lines = [
-
         "📈 Trading Assistant",
-
-        (
-            f"Marché : "
-            f"{regime['color']} "
-            f"({regime['score']}/100)"
-        ),
-
-        (
-            f"Nouvelles positions : "
-            f"{regime['new_positions_allowed']}"
-        ),
-
+        f"Marché : {regime['color']} ({regime['score']}/100)",
+        f"Nouvelles positions autorisées : {regime['new_positions_allowed']}",
         "",
     ]
 
     if regime["color"] == "ROUGE":
-
-        lines.append(
-            "⛔ Aucun nouvel achat."
-        )
-
+        lines.append("⛔ Aucun nouvel achat.")
     elif not candidates:
-
-        lines.append(
-            "Aucune configuration conforme aujourd'hui."
-        )
-
+        lines.append("Aucune configuration conforme aujourd'hui.")
     else:
-
-        for index, candidate in enumerate(
-            candidates,
-            start=1
-        ):
-
-            lines.extend(
-                [
-                    (
-                        f"{index}. "
-                        f"{candidate.ticker} "
-                        f"— score "
-                        f"{candidate.score}/100"
-                    ),
-
-                    (
-                        f"Entrée "
-                        f"{candidate.entry}$ "
-                        f"| Stop "
-                        f"{candidate.stop}$ "
-                        f"| "
-                        f"{candidate.shares} actions"
-                    ),
-
-                    "",
-                ]
-            )
+        for i, c in enumerate(candidates, 1):
+            lines += [
+                f"{i}. {c.ticker} — {c.status} — score {c.score}/100",
+                f"Cours {c.close}$ | Pivot {c.pivot}$",
+                f"Déclenchement {c.entry_trigger}$ | Zone max {c.buy_zone_max}$",
+                f"Stop {c.stop}$ | {c.shares} actions | risque {c.risk_eur}€",
+                "",
+            ]
 
     try:
-
         requests.post(
-
-            (
-                f"https://api.telegram.org/"
-                f"bot{token}/sendMessage"
-            ),
-
-            json={
-                "chat_id":
-                    chat_id,
-
-                "text":
-                    "\n".join(lines),
-            },
-
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": "\n".join(lines)},
             timeout=20,
-
         ).raise_for_status()
-
     except Exception as exc:
+        print(f"Telegram error: {exc}")
 
-        print(
-            f"Telegram error: {exc}"
-        )
-
-
-# ─────────────────────────────────────
-# PROGRAMME PRINCIPAL
-# ─────────────────────────────────────
 
 def main() -> None:
-
-    print(
-        "Starting Trading Assistant..."
-    )
-
-    # ──────────────────────────────
-    # RÉGIME
-    # ──────────────────────────────
+    print("Starting Trading Assistant v1.1")
 
     regime = market_regime()
+    eurusd = get_eurusd()
+    spy_returns = benchmark_returns()
 
-    print(
-        f"Market regime: "
-        f"{regime['color']} "
-        f"({regime['score']}/100)"
-    )
-
-    # ──────────────────────────────
-    # UNIVERS
-    # ──────────────────────────────
+    print(f"Market regime: {regime['color']} ({regime['score']}/100)")
+    print(f"EUR/USD: {eurusd:.4f}")
+    print(f"SPY 6m: {spy_returns['perf_6m']:.2f}% | SPY 12m: {spy_returns['perf_12m']:.2f}%")
 
     symbols = download_universe()
+    frames = fetch_prices(symbols, period="2y")
 
-    print(
-        f"Universe: "
-        f"{len(symbols)} symbols"
-    )
-
-    # ──────────────────────────────
-    # DONNÉES ACTIONS
-    # ──────────────────────────────
-
-    frames = fetch_prices(
-        symbols,
-        period="2y"
-    )
-
-    print(
-        f"Price data downloaded: "
-        f"{len(frames)} symbols"
-    )
-
-    # ──────────────────────────────
-    # SCREENING
-    # ──────────────────────────────
-
-    candidates: list[Candidate] = []
-
-    if regime["color"] != "ROUGE":
-
-        for ticker, frame in frames.items():
-
-            candidate = analyze_symbol(
-                ticker,
-                frame
-            )
-
-            if candidate:
-
-                candidates.append(
-                    candidate
-                )
-
-        candidates.sort(
-            key=lambda candidate:
-                candidate.score,
-            reverse=True
-        )
-
-        candidates = candidates[
-            :
-            int(
-                CONFIG[
-                    "max_new_candidates"
-                ]
-            )
-        ]
-
-    print(
-        f"Candidates retained: "
-        f"{len(candidates)}"
-    )
-
-    for candidate in candidates:
-
-        print(
-            candidate.ticker,
-            candidate.score,
-            candidate.entry,
-            candidate.stop,
-        )
-
-    # ──────────────────────────────
-    # JSON
-    # ──────────────────────────────
-
-    payload = {
-
-        "generated_at":
-            datetime
-            .now()
-            .astimezone()
-            .isoformat(),
-
-        "regime":
-            regime,
-
-        "candidates":
-            [
-                asdict(candidate)
-                for candidate
-                in candidates
-            ],
+    funnel = {
+        "Univers filtré": len(symbols),
+        "Données téléchargées": len(frames),
+        "Historique insuffisant": 0,
+        "Prix minimum": 0,
+        "Liquidité": 0,
+        "Trend template": 0,
+        "MM200 montante": 0,
+        "Proximité 52 semaines": 0,
+        "Momentum 6 mois": 0,
+        "Force relative vs SPY": 0,
+        "Pivot / stop / taille": 0,
+        "Retenus": 0,
+        "Erreurs": 0,
     }
 
-    (
-        DATA
-        /
-        "latest.json"
-    ).write_text(
+    stage_map = {
+        "historique": "Historique insuffisant",
+        "prix": "Prix minimum",
+        "liquidite": "Liquidité",
+        "trend_template": "Trend template",
+        "sma200": "MM200 montante",
+        "52w_high": "Proximité 52 semaines",
+        "momentum": "Momentum 6 mois",
+        "relative_strength": "Force relative vs SPY",
+        "pivot": "Pivot / stop / taille",
+        "stop": "Pivot / stop / taille",
+        "taille": "Pivot / stop / taille",
+        "erreur": "Erreurs",
+    }
 
-        json.dumps(
-            payload,
-            indent=2,
-            ensure_ascii=False
-        ),
+    all_candidates: list[Candidate] = []
 
-        encoding="utf-8"
+    if regime["color"] != "ROUGE":
+        for ticker, frame in frames.items():
+            candidate, stage = analyze_symbol(ticker, frame, spy_returns, eurusd)
+            if candidate:
+                all_candidates.append(candidate)
+                funnel["Retenus"] += 1
+            elif stage in stage_map:
+                funnel[stage_map[stage]] += 1
+
+    status_priority = {
+        "ACHAT POSSIBLE": 0,
+        "ATTENDRE CASSURE": 1,
+        "WATCHLIST": 2,
+        "TROP ETENDU": 3,
+    }
+
+    all_candidates.sort(
+        key=lambda c: (status_priority.get(c.status, 9), -c.score)
     )
 
-    # ──────────────────────────────
-    # PAGE WEB
-    # ──────────────────────────────
+    max_new = int(CONFIG.get("max_new_candidates", 8))
+    candidates = all_candidates[:max_new]
 
-    html = Template(
-        HTML_TEMPLATE
-    ).render(
+    payload = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "version": "1.1",
+        "regime": regime,
+        "eurusd": round(eurusd, 4),
+        "spy_returns": {
+            "perf_6m_pct": round(spy_returns["perf_6m"], 2),
+            "perf_12m_pct": round(spy_returns["perf_12m"], 2),
+        },
+        "funnel": funnel,
+        "candidates": [asdict(c) for c in candidates],
+    }
 
-        regime=
-            regime,
-
-        candidates=
-            candidates,
-
-        generated_at=
-            datetime
-            .now()
-            .astimezone()
-            .strftime(
-                "%d/%m/%Y %H:%M"
-            ),
+    (DATA / "latest.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
 
-    (
-        DOCS
-        /
-        "index.html"
-    ).write_text(
-
-        html,
-
-        encoding="utf-8"
+    html = Template(HTML_TEMPLATE).render(
+        regime=regime,
+        eurusd=round(eurusd, 4),
+        funnel=funnel,
+        candidates=candidates,
+        generated_at=datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
     )
+    (DOCS / "index.html").write_text(html, encoding="utf-8")
 
-    # ──────────────────────────────
-    # TELEGRAM
-    # ──────────────────────────────
+    send_telegram(regime, candidates)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    send_telegram(
-        regime,
-        candidates
-    )
-
-    # ──────────────────────────────
-    # LOG FINAL
-    # ──────────────────────────────
-
-    print(
-        json.dumps(
-            payload,
-            indent=2,
-            ensure_ascii=False
-        )
-    )
-
-
-# ─────────────────────────────────────
-# LANCEMENT
-# ─────────────────────────────────────
 
 if __name__ == "__main__":
     main()
