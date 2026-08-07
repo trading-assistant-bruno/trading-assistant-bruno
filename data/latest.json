@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-07T11:42:23.030919+00:00",
-  "version": "1.2",
+  "generated_at": "2026-08-07T12:04:08.330108+00:00",
+  "version": "1.3",
   "regime": {
     "color": "VERT",
     "score": 90,
@@ -24,14 +24,14 @@
         "sma50_rising": false
       },
       "VIX": {
-        "close": 15.22,
+        "close": 15.21,
         "below_limit": true,
         "limit": 25.0
       }
     },
     "new_positions_allowed": 4
   },
-  "eurusd": 1.1533,
+  "eurusd": 1.1535,
   "spy_returns": {
     "perf_6m_pct": 12.6,
     "perf_12m_pct": 23.74
@@ -74,8 +74,8 @@
       "shares": 7,
       "position_value_usd": 1043.2,
       "risk_usd": 56.47,
-      "risk_eur": 48.97,
-      "eurusd": 1.1533,
+      "risk_eur": 48.95,
+      "eurusd": 1.1535,
       "perf_3m_pct": 17.26,
       "perf_6m_pct": 62.89,
       "perf_12m_pct": 79.42,
@@ -108,7 +108,15 @@
         "Assèchement récent du volume",
         "Volatilité récente en contraction",
         "Volume séance : 1.4× moyenne 20j"
-      ]
+      ],
+      "sector": "Communication Services",
+      "industry": "Entertainment",
+      "next_earnings_date": "2026-11-05",
+      "earnings_days": 90,
+      "earnings_status": "OK",
+      "chart_validation_score": 62.0,
+      "final_decision": "ACHAT CONDITIONNEL",
+      "final_reason": "Setup validé : ordre autorisé uniquement tant que le cours reste sous la borne haute de la zone d'achat."
     },
     {
       "ticker": "OGN",
@@ -125,8 +133,8 @@
       "shares": 141,
       "position_value_usd": 1919.52,
       "risk_usd": 57.59,
-      "risk_eur": 49.93,
-      "eurusd": 1.1533,
+      "risk_eur": 49.92,
+      "eurusd": 1.1535,
       "perf_3m_pct": 1.2,
       "perf_6m_pct": 64.1,
       "perf_12m_pct": 62.73,
@@ -157,7 +165,15 @@
         "Profondeur base : 1.9%",
         "Deux contractions successives détectées",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Healthcare",
+      "industry": "Drug Manufacturers - General",
+      "next_earnings_date": null,
+      "earnings_days": null,
+      "earnings_status": "INCONNU",
+      "chart_validation_score": 85.0,
+      "final_decision": "VÉRIFIER RÉSULTATS",
+      "final_reason": "Date des résultats non confirmée automatiquement : achat non autorisé sans contrôle manuel."
     },
     {
       "ticker": "BY",
@@ -174,8 +190,8 @@
       "shares": 33,
       "position_value_usd": 1300.54,
       "risk_usd": 57.2,
-      "risk_eur": 49.6,
-      "eurusd": 1.1533,
+      "risk_eur": 49.59,
+      "eurusd": 1.1535,
       "perf_3m_pct": 18.75,
       "perf_6m_pct": 19.63,
       "perf_12m_pct": 52.31,
@@ -207,7 +223,15 @@
         "Une contraction successive détectée",
         "Assèchement récent du volume",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Financial Services",
+      "industry": "Banks - Regional",
+      "next_earnings_date": "2026-10-22",
+      "earnings_days": 76,
+      "earnings_status": "OK",
+      "chart_validation_score": 67.8,
+      "final_decision": "PRÉPARER ORDRE",
+      "final_reason": "Setup validé mais cassure non encore confirmée : préparer un ordre conditionnel au déclenchement."
     },
     {
       "ticker": "RAMP",
@@ -224,8 +248,8 @@
       "shares": 50,
       "position_value_usd": 1913.41,
       "risk_usd": 57.4,
-      "risk_eur": 49.77,
-      "eurusd": 1.1533,
+      "risk_eur": 49.76,
+      "eurusd": 1.1535,
       "perf_3m_pct": 28.46,
       "perf_6m_pct": 65.8,
       "perf_12m_pct": 18.0,
@@ -257,7 +281,15 @@
         "Une contraction successive détectée",
         "Assèchement récent du volume",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Technology",
+      "industry": "Software - Infrastructure",
+      "next_earnings_date": "2026-11-04",
+      "earnings_days": 89,
+      "earnings_status": "OK",
+      "chart_validation_score": 87.0,
+      "final_decision": "ATTENDRE",
+      "final_reason": "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre."
     },
     {
       "ticker": "ACA",
@@ -274,8 +306,8 @@
       "shares": 13,
       "position_value_usd": 1911.21,
       "risk_usd": 57.34,
-      "risk_eur": 49.72,
-      "eurusd": 1.1533,
+      "risk_eur": 49.7,
+      "eurusd": 1.1535,
       "perf_3m_pct": 10.31,
       "perf_6m_pct": 21.86,
       "perf_12m_pct": 70.48,
@@ -307,7 +339,15 @@
         "Deux contractions successives détectées",
         "Assèchement récent du volume",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Industrials",
+      "industry": "Engineering & Construction",
+      "next_earnings_date": "2026-10-29",
+      "earnings_days": 83,
+      "earnings_status": "OK",
+      "chart_validation_score": 87.6,
+      "final_decision": "ATTENDRE",
+      "final_reason": "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre."
     },
     {
       "ticker": "TALK",
@@ -324,8 +364,8 @@
       "shares": 365,
       "position_value_usd": 1918.17,
       "risk_usd": 57.54,
-      "risk_eur": 49.9,
-      "eurusd": 1.1533,
+      "risk_eur": 49.89,
+      "eurusd": 1.1535,
       "perf_3m_pct": 0.39,
       "perf_6m_pct": 33.93,
       "perf_12m_pct": 129.52,
@@ -356,7 +396,15 @@
         "Profondeur base : 1.9%",
         "Une contraction successive détectée",
         "Assèchement récent du volume"
-      ]
+      ],
+      "sector": "Healthcare",
+      "industry": "Health Information Services",
+      "next_earnings_date": "2026-10-29",
+      "earnings_days": 83,
+      "earnings_status": "OK",
+      "chart_validation_score": 75.0,
+      "final_decision": "ATTENDRE",
+      "final_reason": "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre."
     },
     {
       "ticker": "BNY",
@@ -373,8 +421,8 @@
       "shares": 4,
       "position_value_usd": 653.14,
       "risk_usd": 49.45,
-      "risk_eur": 42.88,
-      "eurusd": 1.1533,
+      "risk_eur": 42.87,
+      "eurusd": 1.1535,
       "perf_3m_pct": 19.31,
       "perf_6m_pct": 31.95,
       "perf_12m_pct": 60.53,
@@ -406,7 +454,15 @@
         "Deux contractions successives détectées",
         "Assèchement récent du volume",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Financial Services",
+      "industry": "Banks - Diversified",
+      "next_earnings_date": "2026-10-15",
+      "earnings_days": 69,
+      "earnings_status": "OK",
+      "chart_validation_score": 62.8,
+      "final_decision": "ATTENDRE",
+      "final_reason": "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre."
     },
     {
       "ticker": "GSBC",
@@ -423,8 +479,8 @@
       "shares": 10,
       "position_value_usd": 824.82,
       "risk_usd": 57.28,
-      "risk_eur": 49.67,
-      "eurusd": 1.1533,
+      "risk_eur": 49.66,
+      "eurusd": 1.1535,
       "perf_3m_pct": 16.78,
       "perf_6m_pct": 30.19,
       "perf_12m_pct": 47.67,
@@ -456,7 +512,15 @@
         "Deux contractions successives détectées",
         "Assèchement récent du volume",
         "Volatilité récente en contraction"
-      ]
+      ],
+      "sector": "Financial Services",
+      "industry": "Banks - Regional",
+      "next_earnings_date": "2026-10-14",
+      "earnings_days": 68,
+      "earnings_status": "OK",
+      "chart_validation_score": 65.8,
+      "final_decision": "ATTENDRE",
+      "final_reason": "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre."
     }
   ]
 }
