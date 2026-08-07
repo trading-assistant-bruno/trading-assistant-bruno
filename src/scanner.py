@@ -238,13 +238,117 @@ def fetch_prices(
     return output
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalise les colonnes yfinance, qu'elles soient simples
+    ou en MultiIndex (Price/Ticker ou Ticker/Price).
+    """
     x = df.copy()
-    x.columns = [str(c).title() for c in x.columns]
+
     required = {"Open", "High", "Low", "Close", "Volume"}
-    if not required.issubset(set(x.columns)):
-        raise ValueError("Missing OHLCV columns")
+
+    if isinstance(x.columns, pd.MultiIndex):
+        best_level = None
+        best_score = -1
+
+        for level in range(x.columns.nlevels):
+            values = [
+                str(value).title()
+                for value in x.columns.get_level_values(level)
+            ]
+            score = sum(value in required for value in values)
+
+            if score > best_score:
+                best_score = score
+                best_level = level
+
+        if best_level is None or best_score == 0:
+            raise ValueError(
+                f"Impossible d'identifier les colonnes OHLCV dans MultiIndex: "
+                f"{list(x.columns)}"
+            )
+
+        x.columns = [
+            str(value).title()
+            for value in x.columns.get_level_values(best_level)
+        ]
+
+    else:
+        x.columns = [
+            str(column).title()
+            for column in x.columns
+        ]
+
+    x = x.loc[:, ~x.columns.duplicated()]
+
+    missing = required.difference(set(x.columns))
+    if missing:
+        raise ValueError(
+            f"Missing OHLCV columns: {sorted(missing)}. "
+            f"Columns received: {list(x.columns)}"
+        )
+
     return x
 
+
+def close_series(df: pd.DataFrame) -> pd.Series:
+    """
+    Extrait uniquement la série Close de manière robuste.
+    Utilisé pour indices, VIX, FX et benchmark afin de ne pas
+    dépendre de colonnes OHLCV inutiles.
+    """
+    x = df.copy()
+
+    if x is None or x.empty:
+        raise ValueError("Empty market data")
+
+    if isinstance(x.columns, pd.MultiIndex):
+        # Cherche le niveau qui contient 'Close'
+        for level in range(x.columns.nlevels):
+            values = [
+                str(value).title()
+                for value in x.columns.get_level_values(level)
+            ]
+
+            if "Close" in values:
+                close_cols = [
+                    col
+                    for col, value in zip(x.columns, values)
+                    if value == "Close"
+                ]
+
+                if not close_cols:
+                    continue
+
+                series = x[close_cols[0]]
+
+                # Selon pandas/yfinance, l'indexation peut encore
+                # retourner un DataFrame à une seule colonne.
+                if isinstance(series, pd.DataFrame):
+                    series = series.iloc[:, 0]
+
+                return pd.to_numeric(series, errors="coerce").dropna()
+
+        raise ValueError(
+            f"Close introuvable dans MultiIndex: {list(x.columns)}"
+        )
+
+    # Colonnes simples
+    mapping = {
+        str(column).title(): column
+        for column in x.columns
+    }
+
+    if "Close" not in mapping:
+        raise ValueError(
+            f"Close introuvable. Colonnes reçues: {list(x.columns)}"
+        )
+
+    series = x[mapping["Close"]]
+
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
+
+    return pd.to_numeric(series, errors="coerce").dropna()
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     x = normalize_ohlcv(df)
@@ -268,34 +372,45 @@ def pct_return(close: pd.Series, sessions: int) -> float:
 
 
 def get_eurusd() -> float:
-    fallback = float(CONFIG.get("fx", {}).get("eurusd_fallback", 1.10))
+    fallback = float(
+        CONFIG.get("fx", {}).get("eurusd_fallback", 1.10)
+    )
+
     try:
-        data = yf.download(
-            "EURUSD=X",
+        frames = fetch_prices(
+            ["EURUSD=X"],
             period="10d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False,
-            timeout=20,
+            parallel=False,
+            retries=3,
         )
-        if data.empty:
+
+        if "EURUSD=X" not in frames:
             return fallback
 
-        close = data["Close"]
-        if isinstance(close, pd.DataFrame):
-            value = float(close.iloc[-1, 0])
-        else:
-            value = float(close.iloc[-1])
+        close = close_series(frames["EURUSD=X"])
+
+        if close.empty:
+            return fallback
+
+        value = float(close.iloc[-1])
 
         return value if value > 0 else fallback
-    except Exception as exc:
-        print(f"EURUSD failed, using fallback {fallback}: {exc}")
-        return fallback
 
+    except Exception as exc:
+        print(
+            f"EURUSD failed, using fallback {fallback}: {exc}"
+        )
+        return fallback
 
 def market_regime() -> dict:
     tickers = ["QQQ", "SPY", "^IXIC", "^VIX"]
-    frames = fetch_prices(tickers, period="1y", parallel=False, retries=4)
+
+    frames = fetch_prices(
+        tickers,
+        period="1y",
+        parallel=False,
+        retries=4,
+    )
 
     missing = [ticker for ticker in tickers if ticker not in frames]
     if missing:
@@ -306,29 +421,45 @@ def market_regime() -> dict:
 
     details = {}
     positives = 0
+    slope_days = int(cfg("strategy", "sma50_slope_days", 20))
 
     for ticker in ["QQQ", "SPY", "^IXIC"]:
-        df = add_indicators(frames[ticker])
-        last = df.iloc[-1]
-        slope_days = int(cfg("strategy", "sma50_slope_days", 20))
+        close = close_series(frames[ticker])
 
-        sma50_rising = bool(last["SMA50"] > df["SMA50"].iloc[-1 - slope_days])
-        above_50 = bool(last["Close"] > last["SMA50"])
-        above_200 = bool(last["Close"] > last["SMA200"])
+        if len(close) < 220:
+            raise RuntimeError(
+                f"Historique insuffisant pour {ticker}: {len(close)} séances"
+            )
+
+        sma50 = close.rolling(50).mean()
+        sma200 = close.rolling(200).mean()
+
+        last_close = float(close.iloc[-1])
+        last_sma50 = float(sma50.iloc[-1])
+        last_sma200 = float(sma200.iloc[-1])
+
+        previous_sma50 = float(sma50.iloc[-1 - slope_days])
+
+        sma50_rising = bool(last_sma50 > previous_sma50)
+        above_50 = bool(last_close > last_sma50)
+        above_200 = bool(last_close > last_sma200)
 
         positives += sum([above_50, above_200, sma50_rising])
 
         details[ticker] = {
-            "close": round(float(last["Close"]), 2),
+            "close": round(last_close, 2),
             "above_sma50": above_50,
             "above_sma200": above_200,
             "sma50_rising": sma50_rising,
         }
 
-    vix = add_indicators(frames["^VIX"])
-    vix_close = float(vix.iloc[-1]["Close"])
+    vix_close_series = close_series(frames["^VIX"])
+    if vix_close_series.empty:
+        raise RuntimeError("Historique VIX vide")
+
+    vix_close = float(vix_close_series.iloc[-1])
     vix_limit = float(cfg("market", "vix_green_max", 25))
-    vix_ok = vix_close < vix_limit
+    vix_ok = bool(vix_close < vix_limit)
     positives += int(vix_ok)
 
     details["VIX"] = {
@@ -357,18 +488,25 @@ def market_regime() -> dict:
         "new_positions_allowed": allowed,
     }
 
-
 def benchmark_returns() -> dict:
-    frames = fetch_prices(["SPY"], period="2y", parallel=False, retries=4)
-    if "SPY" not in frames:
-        raise RuntimeError("Impossible de télécharger SPY pour la force relative")
-    data = frames["SPY"]
-    df = normalize_ohlcv(data)
-    return {
-        "perf_6m": pct_return(df["Close"], 126),
-        "perf_12m": pct_return(df["Close"], 252),
-    }
+    frames = fetch_prices(
+        ["SPY"],
+        period="2y",
+        parallel=False,
+        retries=4,
+    )
 
+    if "SPY" not in frames:
+        raise RuntimeError(
+            "Impossible de télécharger SPY pour la force relative"
+        )
+
+    close = close_series(frames["SPY"])
+
+    return {
+        "perf_6m": pct_return(close, 126),
+        "perf_12m": pct_return(close, 252),
+    }
 
 def relative_return(stock_pct: float, benchmark_pct: float) -> float:
     if pd.isna(stock_pct) or pd.isna(benchmark_pct):
@@ -679,7 +817,7 @@ def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
 
 
 def main() -> None:
-    print("Starting Trading Assistant v1.1.1")
+    print("Starting Trading Assistant v1.1.2")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -750,7 +888,7 @@ def main() -> None:
 
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "version": "1.1.1",
+        "version": "1.1.2",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
