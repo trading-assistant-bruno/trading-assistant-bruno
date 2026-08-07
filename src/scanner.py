@@ -40,6 +40,7 @@ class Candidate:
     extension_vs_pivot_pct: float
     stop: float
     stop_pct: float
+    technical_stop_pct: float
     shares: int
     position_value_usd: float
     risk_usd: float
@@ -50,10 +51,17 @@ class Candidate:
     perf_12m_pct: float
     rs_6m_vs_spy_pct: float
     rs_12m_vs_spy_pct: float
+    rs_rank: int
     distance_52w_high_pct: float
+    distance_above_52w_low_pct: float
     avg_dollar_volume: float
     volume_ratio: float
-    contraction: bool
+    base_depth_pct: float
+    base_tightness_pct: float
+    volatility_contraction_ratio: float
+    volume_dryup_ratio: float
+    contraction_steps: int
+    base_quality_score: float
     reasons: list[str]
 
 
@@ -518,153 +526,673 @@ def relative_return(stock_pct: float, benchmark_pct: float) -> float:
     return (stock_mult / bench_mult - 1) * 100
 
 
-def determine_status(close: float, pivot: float, entry: float, buy_zone_max: float) -> str:
-    watch_below_pct = float(cfg("strategy", "watchlist_below_pivot_pct", 3.0))
+def compute_universe_momentum(
+    frames: dict[str, pd.DataFrame]
+) -> dict[str, dict]:
+    """RS Rank interne 1-99, percentile de momentum sur l'univers."""
+    rows = {}
+
+    for ticker, raw in frames.items():
+        try:
+            close = close_series(raw)
+            p3 = pct_return(close, 63)
+            p6 = pct_return(close, 126)
+            p12 = pct_return(close, 252)
+
+            if pd.isna(p6):
+                continue
+
+            components = []
+            weights = []
+
+            if not pd.isna(p3):
+                components.append(p3)
+                weights.append(0.40)
+
+            if not pd.isna(p6):
+                components.append(p6)
+                weights.append(0.30)
+
+            if not pd.isna(p12):
+                components.append(p12)
+                weights.append(0.30)
+
+            if not components:
+                continue
+
+            total_weight = sum(weights)
+
+            momentum_score = sum(
+                value * weight
+                for value, weight in zip(components, weights)
+            ) / total_weight
+
+            rows[ticker] = {
+                "perf_3m_pct": p3,
+                "perf_6m_pct": p6,
+                "perf_12m_pct": p12,
+                "momentum_score": momentum_score,
+            }
+
+        except Exception:
+            continue
+
+    if not rows:
+        return {}
+
+    scores = pd.Series(
+        {
+            ticker: metrics["momentum_score"]
+            for ticker, metrics in rows.items()
+        },
+        dtype=float,
+    )
+
+    percentiles = scores.rank(pct=True, method="average")
+
+    for ticker, metrics in rows.items():
+        pct = float(percentiles.loc[ticker])
+        metrics["rs_rank"] = int(
+            max(1, min(99, round(1 + pct * 98)))
+        )
+
+    return rows
+
+
+def determine_status(
+    close: float,
+    pivot: float,
+    entry: float,
+    buy_zone_max: float,
+) -> str:
+    ready_below_pct = float(
+        cfg("strategy", "ready_below_pivot_pct", 0.7)
+    )
+    watch_below_pct = float(
+        cfg("strategy", "watchlist_below_pivot_pct", 3.0)
+    )
+    max_extension_retain_pct = float(
+        cfg("strategy", "max_extension_retain_pct", 4.0)
+    )
 
     if entry <= close <= buy_zone_max:
-        return "ACHAT POSSIBLE"
+        return "DANS ZONE D'ACHAT"
+
     if close > buy_zone_max:
-        return "TROP ETENDU"
+        extension = (close - pivot) / pivot * 100
+        if extension <= max_extension_retain_pct:
+            return "TROP ÉTENDU"
+        return "REJETÉ"
 
     distance_below = (pivot - close) / pivot * 100
-    if 0 <= distance_below <= watch_below_pct:
-        return "ATTENDRE CASSURE"
 
-    return "WATCHLIST"
+    if 0 <= distance_below <= ready_below_pct:
+        return "PRÊT À DÉCLENCHER"
+
+    if ready_below_pct < distance_below <= watch_below_pct:
+        return "ATTENDRE"
+
+    return "REJETÉ"
+
+
+def compute_base_quality(
+    df: pd.DataFrame,
+    close: float,
+) -> dict:
+    lookback = int(
+        cfg("strategy", "base_lookback_days", 50)
+    )
+
+    base = df.tail(lookback)
+
+    if len(base) < 30:
+        raise ValueError("Base history too short")
+
+    base_high = float(base["High"].max())
+    base_low = float(base["Low"].min())
+
+    base_depth_pct = (
+        (base_high - base_low) / base_high * 100
+    )
+
+    recent_5 = base.tail(5)
+
+    base_tightness_pct = (
+        (
+            float(recent_5["High"].max())
+            - float(recent_5["Low"].min())
+        )
+        / close
+        * 100
+    )
+
+    recent_range = float(
+        (
+            df["High"].iloc[-10:]
+            - df["Low"].iloc[-10:]
+        ).mean()
+        / close
+    )
+
+    previous_range = float(
+        (
+            df["High"].iloc[-30:-10]
+            - df["Low"].iloc[-30:-10]
+        ).mean()
+        / close
+    )
+
+    volatility_contraction_ratio = (
+        recent_range / previous_range
+        if previous_range > 0
+        else 1.0
+    )
+
+    recent_vol = float(
+        df["Volume"].iloc[-11:-1].mean()
+    )
+
+    previous_vol = float(
+        df["Volume"].iloc[-41:-11].mean()
+    )
+
+    volume_dryup_ratio = (
+        recent_vol / previous_vol
+        if previous_vol > 0
+        else 1.0
+    )
+
+    blocks = [
+        df.iloc[-30:-20],
+        df.iloc[-20:-10],
+        df.iloc[-10:],
+    ]
+
+    block_ranges = []
+
+    for block in blocks:
+        mean_close = float(block["Close"].mean())
+
+        if mean_close <= 0:
+            block_ranges.append(float("nan"))
+            continue
+
+        range_pct = (
+            (
+                float(block["High"].max())
+                - float(block["Low"].min())
+            )
+            / mean_close
+            * 100
+        )
+
+        block_ranges.append(range_pct)
+
+    contraction_steps = 0
+
+    if not any(pd.isna(value) for value in block_ranges):
+        if block_ranges[1] < block_ranges[0]:
+            contraction_steps += 1
+
+        if block_ranges[2] < block_ranges[1]:
+            contraction_steps += 1
+
+    quality = 0.0
+
+    if base_depth_pct <= 10:
+        quality += 25
+    elif base_depth_pct <= 15:
+        quality += 22
+    elif base_depth_pct <= 20:
+        quality += 16
+    elif base_depth_pct <= 25:
+        quality += 8
+
+    if volatility_contraction_ratio <= 0.60:
+        quality += 25
+    elif volatility_contraction_ratio <= 0.80:
+        quality += 20
+    elif volatility_contraction_ratio <= 1.00:
+        quality += 10
+
+    if volume_dryup_ratio <= 0.70:
+        quality += 20
+    elif volume_dryup_ratio <= 0.85:
+        quality += 15
+    elif volume_dryup_ratio <= 1.00:
+        quality += 8
+
+    if contraction_steps == 2:
+        quality += 20
+    elif contraction_steps == 1:
+        quality += 10
+
+    if base_tightness_pct <= 3:
+        quality += 10
+    elif base_tightness_pct <= 5:
+        quality += 7
+    elif base_tightness_pct <= 7:
+        quality += 4
+
+    return {
+        "base_depth_pct": base_depth_pct,
+        "base_tightness_pct": base_tightness_pct,
+        "volatility_contraction_ratio": volatility_contraction_ratio,
+        "volume_dryup_ratio": volume_dryup_ratio,
+        "contraction_steps": contraction_steps,
+        "base_quality_score": min(100, quality),
+        "block_ranges_pct": block_ranges,
+    }
 
 
 def analyze_symbol(
     ticker: str,
     raw: pd.DataFrame,
+    universe_momentum: dict[str, dict],
     spy_returns: dict,
     eurusd: float,
 ) -> tuple[Candidate | None, str]:
 
     try:
-        df = add_indicators(raw)
+        ohlcv = normalize_ohlcv(raw).dropna(
+            subset=["High", "Low", "Close", "Volume"]
+        )
 
-        if len(df) < 260:
+        if len(ohlcv) < 260:
             return None, "historique"
 
-        df = df.dropna()
-        if df.empty:
-            return None, "historique"
+        momentum = universe_momentum.get(ticker)
 
-        last = df.iloc[-1]
-        close = float(last["Close"])
-
-        if close < float(cfg("universe", "min_price", 5)):
-            return None, "prix"
-
-        avg_dollar_vol = float(last["AvgDollarVol20"])
-        if avg_dollar_vol < float(cfg("universe", "min_avg_dollar_volume", 5_000_000)):
-            return None, "liquidite"
-
-        if not (close > last["SMA50"] > last["SMA150"] > last["SMA200"]):
-            return None, "trend_template"
-
-        slope_days = int(cfg("strategy", "sma200_slope_days", 20))
-        if float(last["SMA200"]) <= float(df["SMA200"].iloc[-1 - slope_days]):
-            return None, "sma200"
-
-        high52 = float(last["High52"])
-        distance_high = (high52 - close) / high52 * 100
-        if distance_high > float(cfg("strategy", "max_distance_from_52w_high_pct", 25)):
-            return None, "52w_high"
-
-        perf_3m = pct_return(df["Close"], 63)
-        perf_6m = pct_return(df["Close"], 126)
-        perf_12m = pct_return(df["Close"], 252)
-
-        if pd.isna(perf_6m) or perf_6m < float(cfg("strategy", "min_perf_6m_pct", 0)):
+        if not momentum:
             return None, "momentum"
 
-        rs_6m = relative_return(perf_6m, spy_returns["perf_6m"])
-        rs_12m = relative_return(perf_12m, spy_returns["perf_12m"])
+        perf_3m = momentum["perf_3m_pct"]
+        perf_6m = momentum["perf_6m_pct"]
+        perf_12m = momentum["perf_12m_pct"]
+        rs_rank = int(momentum["rs_rank"])
 
-        if pd.isna(rs_6m) or rs_6m < float(cfg("strategy", "min_rs_6m_vs_spy_pct", 0)):
+        if rs_rank < int(
+            cfg("strategy", "min_rs_rank", 80)
+        ):
+            return None, "rs_rank"
+
+        df = add_indicators(raw)
+
+        indicator_rows = df.dropna(
+            subset=[
+                "SMA50",
+                "SMA150",
+                "SMA200",
+                "High52",
+                "AvgDollarVol20",
+            ]
+        )
+
+        if indicator_rows.empty:
+            return None, "historique"
+
+        last = indicator_rows.iloc[-1]
+        close = float(last["Close"])
+
+        if close < float(
+            cfg("universe", "min_price", 5)
+        ):
+            return None, "prix"
+
+        avg_dollar_vol = float(
+            last["AvgDollarVol20"]
+        )
+
+        if avg_dollar_vol < float(
+            cfg(
+                "universe",
+                "min_avg_dollar_volume",
+                5_000_000,
+            )
+        ):
+            return None, "liquidite"
+
+        if not (
+            close
+            > float(last["SMA50"])
+            > float(last["SMA150"])
+            > float(last["SMA200"])
+        ):
+            return None, "trend_template"
+
+        slope_days = int(
+            cfg("strategy", "sma200_slope_days", 20)
+        )
+
+        sma200 = df["SMA200"].dropna()
+
+        if len(sma200) <= slope_days:
+            return None, "historique"
+
+        if float(sma200.iloc[-1]) <= float(
+            sma200.iloc[-1 - slope_days]
+        ):
+            return None, "sma200"
+
+        tail_52w = ohlcv.tail(252)
+        high52 = float(tail_52w["High"].max())
+        low52 = float(tail_52w["Low"].min())
+
+        distance_high = (
+            (high52 - close) / high52 * 100
+        )
+
+        distance_above_low = (
+            (close / low52 - 1) * 100
+        )
+
+        if distance_high > float(
+            cfg(
+                "strategy",
+                "max_distance_from_52w_high_pct",
+                25,
+            )
+        ):
+            return None, "52w_high"
+
+        if distance_above_low < float(
+            cfg(
+                "strategy",
+                "min_distance_above_52w_low_pct",
+                30,
+            )
+        ):
+            return None, "52w_low"
+
+        if (
+            pd.isna(perf_6m)
+            or perf_6m
+            < float(
+                cfg(
+                    "strategy",
+                    "min_perf_6m_pct",
+                    10,
+                )
+            )
+        ):
+            return None, "momentum"
+
+        rs_6m = relative_return(
+            perf_6m,
+            spy_returns["perf_6m"],
+        )
+
+        rs_12m = relative_return(
+            perf_12m,
+            spy_returns["perf_12m"],
+        )
+
+        if (
+            pd.isna(rs_6m)
+            or rs_6m
+            < float(
+                cfg(
+                    "strategy",
+                    "min_rs_6m_vs_spy_pct",
+                    0,
+                )
+            )
+        ):
             return None, "relative_strength"
 
-        lookback = int(cfg("strategy", "pivot_lookback_days", 60))
-        exclude_recent = int(cfg("strategy", "pivot_exclude_recent_days", 5))
+        base_metrics = compute_base_quality(
+            ohlcv,
+            close,
+        )
 
-        pivot_window = df["High"].iloc[-lookback:-exclude_recent]
+        if (
+            base_metrics["base_depth_pct"]
+            > float(
+                cfg(
+                    "strategy",
+                    "max_base_depth_pct",
+                    25,
+                )
+            )
+        ):
+            return None, "base_depth"
+
+        if (
+            base_metrics["base_quality_score"]
+            < float(
+                cfg(
+                    "strategy",
+                    "min_base_quality_score",
+                    45,
+                )
+            )
+        ):
+            return None, "base_quality"
+
+        lookback = int(
+            cfg("strategy", "pivot_lookback_days", 60)
+        )
+
+        exclude_recent = int(
+            cfg(
+                "strategy",
+                "pivot_exclude_recent_days",
+                5,
+            )
+        )
+
+        pivot_window = ohlcv["High"].iloc[
+            -lookback:-exclude_recent
+        ]
+
         if pivot_window.empty:
             return None, "pivot"
 
         pivot = float(pivot_window.max())
-        entry_buffer_pct = float(cfg("strategy", "entry_buffer_pct", 0.10))
-        entry = pivot * (1 + entry_buffer_pct / 100)
 
-        buy_zone_pct = float(cfg("strategy", "max_distance_above_pivot_pct", 1.5))
-        buy_zone_max = pivot * (1 + buy_zone_pct / 100)
+        entry_buffer_pct = float(
+            cfg("strategy", "entry_buffer_pct", 0.10)
+        )
 
-        extension_vs_pivot = (close - pivot) / pivot * 100
-        status = determine_status(close, pivot, entry, buy_zone_max)
+        entry = pivot * (
+            1 + entry_buffer_pct / 100
+        )
 
-        recent_swing_low = float(df["Low"].iloc[-10:].min()) * 0.995
-        min_stop_pct = float(cfg("strategy", "min_stop_distance_pct", 3))
-        max_stop_pct = float(cfg("strategy", "max_stop_distance_pct", 8))
+        buy_zone_pct = float(
+            cfg(
+                "strategy",
+                "max_distance_above_pivot_pct",
+                1.5,
+            )
+        )
 
-        min_stop = entry * (1 - min_stop_pct / 100)
-        max_stop = entry * (1 - max_stop_pct / 100)
+        buy_zone_max = pivot * (
+            1 + buy_zone_pct / 100
+        )
 
-        stop = min(min_stop, recent_swing_low)
-        stop = max(stop, max_stop)
+        extension_vs_pivot = (
+            (close - pivot) / pivot * 100
+        )
 
-        stop_pct = (entry - stop) / entry * 100
-        if stop_pct <= 0 or stop_pct > max_stop_pct + 1e-6:
+        status = determine_status(
+            close,
+            pivot,
+            entry,
+            buy_zone_max,
+        )
+
+        if status == "REJETÉ":
+            return None, "distance_pivot"
+
+        recent_swing_low = float(
+            ohlcv["Low"].iloc[-10:].min()
+        ) * 0.995
+
+        technical_stop_pct = (
+            (entry - recent_swing_low)
+            / entry
+            * 100
+        )
+
+        max_stop_pct = float(
+            cfg(
+                "strategy",
+                "max_stop_distance_pct",
+                8,
+            )
+        )
+
+        min_stop_pct = float(
+            cfg(
+                "strategy",
+                "min_stop_distance_pct",
+                3,
+            )
+        )
+
+        if technical_stop_pct <= 0:
             return None, "stop"
 
-        capital_eur = float(CONFIG.get("capital_eur", 10_000))
-        risk_pct = float(CONFIG.get("risk_per_trade_pct", 0.5))
-        max_risk_eur = capital_eur * risk_pct / 100
-        max_risk_usd = max_risk_eur * eurusd
+        if technical_stop_pct > max_stop_pct:
+            return None, "stop_trop_large"
 
-        risk_per_share_usd = entry - stop
+        if technical_stop_pct < min_stop_pct:
+            stop = entry * (
+                1 - min_stop_pct / 100
+            )
+        else:
+            stop = recent_swing_low
+
+        stop_pct = (
+            (entry - stop)
+            / entry
+            * 100
+        )
+
+        capital_eur = float(
+            CONFIG.get("capital_eur", 10_000)
+        )
+
+        risk_pct = float(
+            CONFIG.get("risk_per_trade_pct", 0.5)
+        )
+
+        max_risk_eur = (
+            capital_eur
+            * risk_pct
+            / 100
+        )
+
+        max_risk_usd = (
+            max_risk_eur
+            * eurusd
+        )
+
+        risk_per_share_usd = (
+            entry - stop
+        )
+
         if risk_per_share_usd <= 0:
             return None, "stop"
 
-        shares = math.floor(max_risk_usd / risk_per_share_usd)
+        shares = math.floor(
+            max_risk_usd
+            / risk_per_share_usd
+        )
+
         if shares < 1:
             return None, "taille"
 
-        risk_usd = shares * risk_per_share_usd
-        actual_risk_eur = risk_usd / eurusd
-        position_value_usd = shares * entry
+        risk_usd = (
+            shares
+            * risk_per_share_usd
+        )
 
-        avg_vol = float(df["Volume"].iloc[-21:-1].mean())
-        volume_ratio = float(last["Volume"] / max(avg_vol, 1))
+        actual_risk_eur = (
+            risk_usd
+            / eurusd
+        )
 
-        volatility_now = float(((df["High"].iloc[-10:] - df["Low"].iloc[-10:]).mean()) / close)
-        volatility_prev = float(((df["High"].iloc[-30:-10] - df["Low"].iloc[-30:-10]).mean()) / close)
-        contraction = volatility_now < volatility_prev
+        position_value_usd = (
+            shares
+            * entry
+        )
 
-        score = 40.0
-        score += max(0, min(15, perf_6m / 4))
-        score += max(0, min(10, perf_12m / 10))
-        score += max(0, min(15, rs_6m / 2))
-        score += max(0, 10 - distance_high * 0.4)
+        avg_vol = float(
+            ohlcv["Volume"].iloc[-21:-1].mean()
+        )
 
-        if contraction:
+        volume_ratio = float(
+            ohlcv["Volume"].iloc[-1]
+            / max(avg_vol, 1)
+        )
+
+        score = 0.0
+        score += rs_rank * 0.35
+        score += (
+            base_metrics["base_quality_score"]
+            * 0.35
+        )
+        score += max(
+            0,
+            min(15, perf_6m / 6)
+        )
+        score += max(
+            0,
+            10 - distance_high * 0.4
+        )
+
+        if volume_ratio >= 1.5:
             score += 5
-        if volume_ratio > 1.2:
-            score += 5
+        elif volume_ratio >= 1.2:
+            score += 3
 
-        score = min(100, round(score, 1))
+        score = min(
+            100,
+            round(score, 1),
+        )
 
         reasons = [
+            f"RS Rank interne : {rs_rank}/99",
             "Cours > MM50 > MM150 > MM200",
             "MM200 montante",
+            f"Performance 3 mois : {perf_3m:.1f}%",
             f"Performance 6 mois : {perf_6m:.1f}%",
+            (
+                f"Performance 12 mois : {perf_12m:.1f}%"
+                if not pd.isna(perf_12m)
+                else "Historique 12 mois incomplet"
+            ),
             f"RS 6 mois vs SPY : {rs_6m:+.1f}%",
             f"À {distance_high:.1f}% du plus haut 52 semaines",
+            f"{distance_above_low:.1f}% au-dessus du plus bas 52 semaines",
+            f"Qualité de base : {base_metrics['base_quality_score']:.0f}/100",
+            f"Profondeur base : {base_metrics['base_depth_pct']:.1f}%",
         ]
 
-        if contraction:
-            reasons.append("Volatilité récente en contraction")
-        if volume_ratio > 1.2:
-            reasons.append(f"Volume {volume_ratio:.1f}× la moyenne 20j")
+        if base_metrics["contraction_steps"] == 2:
+            reasons.append(
+                "Deux contractions successives détectées"
+            )
+        elif base_metrics["contraction_steps"] == 1:
+            reasons.append(
+                "Une contraction successive détectée"
+            )
+
+        if base_metrics["volume_dryup_ratio"] <= 0.85:
+            reasons.append(
+                "Assèchement récent du volume"
+            )
+
+        if base_metrics["volatility_contraction_ratio"] < 1:
+            reasons.append(
+                "Volatilité récente en contraction"
+            )
+
+        if volume_ratio >= 1.2:
+            reasons.append(
+                f"Volume séance : {volume_ratio:.1f}× moyenne 20j"
+            )
 
         return Candidate(
             ticker=ticker,
@@ -674,28 +1202,98 @@ def analyze_symbol(
             pivot=round(pivot, 2),
             entry_trigger=round(entry, 2),
             buy_zone_max=round(buy_zone_max, 2),
-            extension_vs_pivot_pct=round(extension_vs_pivot, 2),
+            extension_vs_pivot_pct=round(
+                extension_vs_pivot,
+                2,
+            ),
             stop=round(stop, 2),
             stop_pct=round(stop_pct, 2),
+            technical_stop_pct=round(
+                technical_stop_pct,
+                2,
+            ),
             shares=shares,
-            position_value_usd=round(position_value_usd, 2),
+            position_value_usd=round(
+                position_value_usd,
+                2,
+            ),
             risk_usd=round(risk_usd, 2),
-            risk_eur=round(actual_risk_eur, 2),
+            risk_eur=round(
+                actual_risk_eur,
+                2,
+            ),
             eurusd=round(eurusd, 4),
-            perf_3m_pct=round(perf_3m, 2),
-            perf_6m_pct=round(perf_6m, 2),
-            perf_12m_pct=round(perf_12m, 2),
-            rs_6m_vs_spy_pct=round(rs_6m, 2),
-            rs_12m_vs_spy_pct=round(rs_12m, 2),
-            distance_52w_high_pct=round(distance_high, 2),
-            avg_dollar_volume=round(avg_dollar_vol, 0),
-            volume_ratio=round(volume_ratio, 2),
-            contraction=contraction,
+            perf_3m_pct=round(
+                perf_3m,
+                2,
+            ),
+            perf_6m_pct=round(
+                perf_6m,
+                2,
+            ),
+            perf_12m_pct=(
+                round(perf_12m, 2)
+                if not pd.isna(perf_12m)
+                else float("nan")
+            ),
+            rs_6m_vs_spy_pct=round(
+                rs_6m,
+                2,
+            ),
+            rs_12m_vs_spy_pct=(
+                round(rs_12m, 2)
+                if not pd.isna(rs_12m)
+                else float("nan")
+            ),
+            rs_rank=rs_rank,
+            distance_52w_high_pct=round(
+                distance_high,
+                2,
+            ),
+            distance_above_52w_low_pct=round(
+                distance_above_low,
+                2,
+            ),
+            avg_dollar_volume=round(
+                avg_dollar_vol,
+                0,
+            ),
+            volume_ratio=round(
+                volume_ratio,
+                2,
+            ),
+            base_depth_pct=round(
+                base_metrics["base_depth_pct"],
+                2,
+            ),
+            base_tightness_pct=round(
+                base_metrics["base_tightness_pct"],
+                2,
+            ),
+            volatility_contraction_ratio=round(
+                base_metrics[
+                    "volatility_contraction_ratio"
+                ],
+                2,
+            ),
+            volume_dryup_ratio=round(
+                base_metrics["volume_dryup_ratio"],
+                2,
+            ),
+            contraction_steps=int(
+                base_metrics["contraction_steps"]
+            ),
+            base_quality_score=round(
+                base_metrics["base_quality_score"],
+                1,
+            ),
             reasons=reasons,
         ), "retenu"
 
     except Exception as exc:
-        print(f"{ticker}: analysis failed: {exc}")
+        print(
+            f"{ticker}: analysis failed: {exc}"
+        )
         return None, "erreur"
 
 
@@ -708,7 +1306,7 @@ HTML_TEMPLATE = """
 <title>Trading Assistant Bruno</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;margin:0;color:#18212f}
-main{max-width:860px;margin:auto;padding:18px}
+main{max-width:900px;margin:auto;padding:18px}
 .card{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 18px #00000012}
 h1{font-size:24px}.regime{font-size:28px;font-weight:800}
 .VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
@@ -722,12 +1320,12 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
 </style>
 </head>
 <body><main>
-<h1>Trading Assistant Bruno</h1>
+<h1>Trading Assistant Bruno — v1.2</h1>
 
 <div class="card">
 <div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
-<p>Score de régime : {{ regime.score }}/100 — nouvelles positions autorisées : {{ regime.new_positions_allowed }}</p>
-<p>EUR/USD utilisé : {{ eurusd }}</p>
+<p>Score régime : {{ regime.score }}/100 — nouvelles positions autorisées : {{ regime.new_positions_allowed }}</p>
+<p>EUR/USD : {{ eurusd }}</p>
 <small>Calculé le {{ generated_at }}</small>
 </div>
 
@@ -744,20 +1342,28 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
 <div class="card"><h2>Aucun nouvel achat</h2><p>Le régime rouge bloque automatiquement les nouvelles positions.</p></div>
 {% endif %}
 
+{% if not candidates and regime.color != "ROUGE" %}
+<div class="card"><h2>Aucun finaliste</h2><p>Aucune action ne respecte aujourd'hui l'ensemble des critères de qualité v1.2.</p></div>
+{% endif %}
+
 {% for c in candidates %}
 <div class="card">
 <div class="ticker">{{ loop.index }}. {{ c.ticker }} <span class="score">{{ c.score }}/100</span></div>
 <div class="status">{{ c.status }}</div>
-<p>Cours : <b>{{ c.close }} $</b> — pivot : <b>{{ c.pivot }} $</b></p>
+<p>Cours : <b>{{ c.close }} $</b> — Pivot : <b>{{ c.pivot }} $</b> — RS Rank : <b>{{ c.rs_rank }}/99</b></p>
 
 <div class="grid">
 <div class="metric"><small>Déclenchement</small><br><b>{{ c.entry_trigger }} $</b></div>
 <div class="metric"><small>Zone d'achat max</small><br><b>{{ c.buy_zone_max }} $</b></div>
-<div class="metric"><small>Stop initial</small><br><b>{{ c.stop }} $</b> ({{ c.stop_pct }}%)</div>
+<div class="metric"><small>Stop technique</small><br><b>{{ c.stop }} $</b> ({{ c.stop_pct }}%)</div>
 <div class="metric"><small>Taille</small><br><b>{{ c.shares }} actions</b></div>
 <div class="metric"><small>Risque réel</small><br><b>{{ c.risk_eur }} €</b></div>
 <div class="metric"><small>Position</small><br><b>{{ c.position_value_usd }} $</b></div>
+<div class="metric"><small>Qualité base</small><br><b>{{ c.base_quality_score }}/100</b></div>
+<div class="metric"><small>Profondeur base</small><br><b>{{ c.base_depth_pct }}%</b></div>
+<div class="metric"><small>Perf. 3 mois</small><br><b>{{ c.perf_3m_pct }}%</b></div>
 <div class="metric"><small>Perf. 6 mois</small><br><b>{{ c.perf_6m_pct }}%</b></div>
+<div class="metric"><small>Perf. 12 mois</small><br><b>{{ c.perf_12m_pct }}%</b></div>
 <div class="metric"><small>RS 6m vs SPY</small><br><b>{{ c.rs_6m_vs_spy_pct }}%</b></div>
 </div>
 
@@ -768,16 +1374,22 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
 
 <div class="card">
 <small>
+RS Rank = percentile de momentum interne à l'univers, pas l'IBD RS Rating.
 Le score est un classement technique, pas une probabilité de gain.
-Cette version ne vérifie pas encore automatiquement les résultats d'entreprise ni la qualité visuelle VCP/flat base.
+La v1.2 n'intègre pas encore le calendrier des résultats, le secteur, ni la validation graphique visuelle avancée.
 Aucun ordre n'est envoyé au broker.
 </small>
 </div>
+
 </main></body></html>
 """
 
 
-def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
+
+def send_telegram(
+    regime: dict,
+    candidates: list[Candidate],
+) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -786,7 +1398,7 @@ def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
         return
 
     lines = [
-        "📈 Trading Assistant",
+        "📈 Trading Assistant v1.2",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         f"Nouvelles positions autorisées : {regime['new_positions_allowed']}",
         "",
@@ -795,11 +1407,12 @@ def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
     if regime["color"] == "ROUGE":
         lines.append("⛔ Aucun nouvel achat.")
     elif not candidates:
-        lines.append("Aucune configuration conforme aujourd'hui.")
+        lines.append("Aucun finaliste conforme aujourd'hui.")
     else:
         for i, c in enumerate(candidates, 1):
             lines += [
-                f"{i}. {c.ticker} — {c.status} — score {c.score}/100",
+                f"{i}. {c.ticker} — {c.status} — {c.score}/100",
+                f"RS Rank {c.rs_rank}/99 | Base {c.base_quality_score}/100",
                 f"Cours {c.close}$ | Pivot {c.pivot}$",
                 f"Déclenchement {c.entry_trigger}$ | Zone max {c.buy_zone_max}$",
                 f"Stop {c.stop}$ | {c.shares} actions | risque {c.risk_eur}€",
@@ -817,7 +1430,7 @@ def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
 
 
 def main() -> None:
-    print("Starting Trading Assistant v1.1.2")
+    print("Starting Trading Assistant v1.2")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -825,82 +1438,136 @@ def main() -> None:
 
     print(f"Market regime: {regime['color']} ({regime['score']}/100)")
     print(f"EUR/USD: {eurusd:.4f}")
-    print(f"SPY 6m: {spy_returns['perf_6m']:.2f}% | SPY 12m: {spy_returns['perf_12m']:.2f}%")
+    print(
+        f"SPY 6m: {spy_returns['perf_6m']:.2f}% | "
+        f"SPY 12m: {spy_returns['perf_12m']:.2f}%"
+    )
 
     symbols = download_universe()
-    frames = fetch_prices(symbols, period="2y", parallel=True, retries=2)
+    frames = {}
+
+    if regime["color"] != "ROUGE":
+        frames = fetch_prices(
+            symbols,
+            period="2y",
+            parallel=True,
+            retries=2,
+        )
 
     funnel = {
         "Univers filtré": len(symbols),
         "Données téléchargées": len(frames),
-        "Historique insuffisant": 0,
-        "Prix minimum": 0,
-        "Liquidité": 0,
-        "Trend template": 0,
-        "MM200 montante": 0,
-        "Proximité 52 semaines": 0,
-        "Momentum 6 mois": 0,
-        "Force relative vs SPY": 0,
-        "Pivot / stop / taille": 0,
-        "Retenus": 0,
+        "Rejet - historique": 0,
+        "Rejet - prix": 0,
+        "Rejet - liquidité": 0,
+        "Rejet - RS Rank": 0,
+        "Rejet - Trend Template": 0,
+        "Rejet - MM200": 0,
+        "Rejet - range 52 semaines": 0,
+        "Rejet - momentum": 0,
+        "Rejet - RS vs SPY": 0,
+        "Rejet - profondeur base": 0,
+        "Rejet - qualité base": 0,
+        "Rejet - distance pivot": 0,
+        "Rejet - stop > 8% / invalide": 0,
+        "Rejet - taille": 0,
         "Erreurs": 0,
+        "Finalistes": 0,
+        "Affichés": 0,
     }
 
     stage_map = {
-        "historique": "Historique insuffisant",
-        "prix": "Prix minimum",
-        "liquidite": "Liquidité",
-        "trend_template": "Trend template",
-        "sma200": "MM200 montante",
-        "52w_high": "Proximité 52 semaines",
-        "momentum": "Momentum 6 mois",
-        "relative_strength": "Force relative vs SPY",
-        "pivot": "Pivot / stop / taille",
-        "stop": "Pivot / stop / taille",
-        "taille": "Pivot / stop / taille",
+        "historique": "Rejet - historique",
+        "prix": "Rejet - prix",
+        "liquidite": "Rejet - liquidité",
+        "rs_rank": "Rejet - RS Rank",
+        "trend_template": "Rejet - Trend Template",
+        "sma200": "Rejet - MM200",
+        "52w_high": "Rejet - range 52 semaines",
+        "52w_low": "Rejet - range 52 semaines",
+        "momentum": "Rejet - momentum",
+        "relative_strength": "Rejet - RS vs SPY",
+        "base_depth": "Rejet - profondeur base",
+        "base_quality": "Rejet - qualité base",
+        "pivot": "Rejet - distance pivot",
+        "distance_pivot": "Rejet - distance pivot",
+        "stop": "Rejet - stop > 8% / invalide",
+        "stop_trop_large": "Rejet - stop > 8% / invalide",
+        "taille": "Rejet - taille",
         "erreur": "Erreurs",
     }
 
     all_candidates: list[Candidate] = []
 
     if regime["color"] != "ROUGE":
+        universe_momentum = compute_universe_momentum(frames)
+
+        print(
+            f"Momentum ranks computed: {len(universe_momentum)}"
+        )
+
         for ticker, frame in frames.items():
-            candidate, stage = analyze_symbol(ticker, frame, spy_returns, eurusd)
+            candidate, stage = analyze_symbol(
+                ticker,
+                frame,
+                universe_momentum,
+                spy_returns,
+                eurusd,
+            )
+
             if candidate:
                 all_candidates.append(candidate)
-                funnel["Retenus"] += 1
             elif stage in stage_map:
                 funnel[stage_map[stage]] += 1
 
+    funnel["Finalistes"] = len(all_candidates)
+
     status_priority = {
-        "ACHAT POSSIBLE": 0,
-        "ATTENDRE CASSURE": 1,
-        "WATCHLIST": 2,
-        "TROP ETENDU": 3,
+        "DANS ZONE D'ACHAT": 0,
+        "PRÊT À DÉCLENCHER": 1,
+        "ATTENDRE": 2,
+        "TROP ÉTENDU": 3,
     }
 
     all_candidates.sort(
-        key=lambda c: (status_priority.get(c.status, 9), -c.score)
+        key=lambda c: (
+            status_priority.get(c.status, 9),
+            -c.score,
+            -c.rs_rank,
+        )
     )
 
-    max_new = int(CONFIG.get("max_new_candidates", 8))
+    max_new = int(
+        CONFIG.get("max_new_candidates", 8)
+    )
+
     candidates = all_candidates[:max_new]
+    funnel["Affichés"] = len(candidates)
 
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "version": "1.1.2",
+        "version": "1.2",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
             "perf_6m_pct": round(spy_returns["perf_6m"], 2),
             "perf_12m_pct": round(spy_returns["perf_12m"], 2),
         },
+        "rs_rank_definition": (
+            "Percentile momentum interne 1-99, "
+            "non équivalent au rating IBD propriétaire"
+        ),
         "funnel": funnel,
         "candidates": [asdict(c) for c in candidates],
     }
 
     (DATA / "latest.json").write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=True,
+        ),
         encoding="utf-8",
     )
 
@@ -911,11 +1578,24 @@ def main() -> None:
         candidates=candidates,
         generated_at=datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
     )
-    (DOCS / "index.html").write_text(html, encoding="utf-8")
+
+    (DOCS / "index.html").write_text(
+        html,
+        encoding="utf-8",
+    )
 
     send_telegram(regime, candidates)
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    print(
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=True,
+        )
+    )
 
 
 if __name__ == "__main__":
     main()
+

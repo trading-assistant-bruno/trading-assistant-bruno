@@ -19,13 +19,25 @@ fx:
 strategy:
   sma50_slope_days: 20
   sma200_slope_days: 20
+
   max_distance_from_52w_high_pct: 25
+  min_distance_above_52w_low_pct: 30
+
+  min_perf_6m_pct: 10
+  min_rs_6m_vs_spy_pct: 0
+  min_rs_rank: 80
+
+  base_lookback_days: 50
+  max_base_depth_pct: 25
+  min_base_quality_score: 45
+
   pivot_lookback_days: 60
   pivot_exclude_recent_days: 5
   entry_buffer_pct: 0.10
   max_distance_above_pivot_pct: 1.5
+  ready_below_pivot_pct: 0.7
   watchlist_below_pivot_pct: 3.0
+  max_extension_retain_pct: 4.0
+
   min_stop_distance_pct: 3
   max_stop_distance_pct: 8
-  min_perf_6m_pct: 0
-  min_rs_6m_vs_spy_pct: 0
