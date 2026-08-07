@@ -1,3 +1,33 @@
 {
-  "status": "not_run_yet"
+  "generated_at": "2026-08-07T07:10:51.179848+00:00",
+  "regime": {
+    "color": "VERT",
+    "score": 90,
+    "details": {
+      "QQQ": {
+        "close": 714.65,
+        "above_sma50": true,
+        "above_sma200": true,
+        "sma50_rising": true
+      },
+      "SPY": {
+        "close": 768.56,
+        "above_sma50": true,
+        "above_sma200": true,
+        "sma50_rising": true
+      },
+      "^IXIC": {
+        "close": 26348.35,
+        "above_sma50": true,
+        "above_sma200": true,
+        "sma50_rising": false
+      },
+      "VIX": {
+        "close": 15.15,
+        "below_25": true
+      }
+    },
+    "new_positions_allowed": 4
+  },
+  "candidates": []
 }
