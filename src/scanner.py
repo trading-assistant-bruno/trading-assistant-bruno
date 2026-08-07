@@ -121,107 +121,128 @@ def batched(items: list[str], size: int) -> Iterable[list[str]]:
         yield items[i:i + size]
 
 
-def fetch_prices(symbols: list[str], period: str = "2y") -> dict[str, pd.DataFrame]:
+def _extract_downloaded_frames(
+    data: pd.DataFrame,
+    batch: list[str],
+) -> dict[str, pd.DataFrame]:
     output: dict[str, pd.DataFrame] = {}
 
-    for batch_no, batch in enumerate(batched(symbols, 150), start=1):
-        print(f"Downloading batch {batch_no}: {len(batch)} symbols")
+    if data is None or data.empty:
+        return output
+
+    if len(batch) == 1:
+        ticker = batch[0]
+        frame = data.dropna(how="all")
+        if not frame.empty:
+            output[ticker] = frame
+        return output
+
+    for ticker in batch:
         try:
-            data = yf.download(
-                tickers=batch,
-                period=period,
-                interval="1d",
-                auto_adjust=True,
-                group_by="ticker",
-                threads=True,
-                progress=False,
-                timeout=30,
-            )
+            frame = data[ticker].dropna(how="all")
+            if not frame.empty:
+                output[ticker] = frame
+        except Exception:
+            continue
 
-            if len(batch) == 1:
-                ticker = batch[0]
-                if not data.empty:
-                    output[ticker] = data.dropna(how="all")
-            else:
-                for ticker in batch:
-                    try:
-                        frame = data[ticker].dropna(how="all")
-                        if not frame.empty:
-                            output[ticker] = frame
-                    except Exception:
-                        continue
+    return output
 
-        except Exception as exc:
-            print(f"Batch failed: {exc}")
+
+def fetch_prices(
+    symbols: list[str],
+    period: str = "2y",
+    parallel: bool = True,
+    retries: int = 3,
+) -> dict[str, pd.DataFrame]:
+    """
+    Télécharge les prix avec reprise automatique.
+
+    - Pour les indices/benchmarks : utiliser parallel=False afin
+      d'éviter les conflits de cache SQLite de yfinance.
+    - Pour le gros univers d'actions : parallel=True pour conserver
+      un temps de scan raisonnable.
+    """
+    output: dict[str, pd.DataFrame] = {}
+
+    batch_size = 150 if parallel else 1
+
+    for batch_no, batch in enumerate(batched(symbols, batch_size), start=1):
+        print(f"Downloading batch {batch_no}: {len(batch)} symbols")
+
+        batch_output: dict[str, pd.DataFrame] = {}
+
+        for attempt in range(1, retries + 1):
+            try:
+                data = yf.download(
+                    tickers=batch,
+                    period=period,
+                    interval="1d",
+                    auto_adjust=True,
+                    group_by="ticker",
+                    threads=parallel,
+                    progress=False,
+                    timeout=30,
+                )
+
+                batch_output = _extract_downloaded_frames(data, batch)
+
+                if len(batch_output) == len(batch):
+                    break
+
+            except Exception as exc:
+                print(
+                    f"Batch attempt {attempt}/{retries} failed "
+                    f"for {batch}: {exc}"
+                )
+
+            time.sleep(1.5 * attempt)
+
+        output.update(batch_output)
+
+        # Reprise individuelle des tickers manquants.
+        missing = [ticker for ticker in batch if ticker not in output]
+
+        for ticker in missing:
+            for attempt in range(1, retries + 1):
+                try:
+                    print(
+                        f"Retrying {ticker} individually "
+                        f"({attempt}/{retries})"
+                    )
+
+                    data = yf.download(
+                        ticker,
+                        period=period,
+                        interval="1d",
+                        auto_adjust=True,
+                        progress=False,
+                        threads=False,
+                        timeout=30,
+                    )
+
+                    frames = _extract_downloaded_frames(data, [ticker])
+
+                    if ticker in frames:
+                        output[ticker] = frames[ticker]
+                        break
+
+                except Exception as exc:
+                    print(
+                        f"{ticker} retry {attempt}/{retries} failed: {exc}"
+                    )
+
+                time.sleep(2 * attempt)
 
         time.sleep(0.20)
 
     return output
 
-
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
-
-    required = {
-        "Open",
-        "High",
-        "Low",
-        "Close",
-        "Volume",
-    }
-
-    # yfinance peut renvoyer des colonnes MultiIndex,
-    # notamment pour un seul ticker.
-    if isinstance(x.columns, pd.MultiIndex):
-
-        best_level = None
-        best_score = -1
-
-        for level in range(x.columns.nlevels):
-
-            values = [
-                str(value).title()
-                for value
-                in x.columns.get_level_values(level)
-            ]
-
-            score = sum(
-                value in required
-                for value in values
-            )
-
-            if score > best_score:
-                best_score = score
-                best_level = level
-
-        x.columns = [
-            str(value).title()
-            for value
-            in x.columns.get_level_values(best_level)
-        ]
-
-    else:
-
-        x.columns = [
-            str(column).title()
-            for column
-            in x.columns
-        ]
-
-    # Évite d'éventuelles colonnes dupliquées
-    x = x.loc[
-        :,
-        ~x.columns.duplicated()
-    ]
-
-    if not required.issubset(
-        set(x.columns)
-    ):
-        raise ValueError(
-            f"Missing OHLCV columns. "
-            f"Columns received: {list(x.columns)}"
-        )
-
+    x.columns = [str(c).title() for c in x.columns]
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    if not required.issubset(set(x.columns)):
+        raise ValueError("Missing OHLCV columns")
     return x
 
 
@@ -274,7 +295,14 @@ def get_eurusd() -> float:
 
 def market_regime() -> dict:
     tickers = ["QQQ", "SPY", "^IXIC", "^VIX"]
-    frames = fetch_prices(tickers, period="1y")
+    frames = fetch_prices(tickers, period="1y", parallel=False, retries=4)
+
+    missing = [ticker for ticker in tickers if ticker not in frames]
+    if missing:
+        raise RuntimeError(
+            "Données de marché indisponibles après plusieurs tentatives : "
+            + ", ".join(missing)
+        )
 
     details = {}
     positives = 0
@@ -331,7 +359,10 @@ def market_regime() -> dict:
 
 
 def benchmark_returns() -> dict:
-    data = fetch_prices(["SPY"], period="2y")["SPY"]
+    frames = fetch_prices(["SPY"], period="2y", parallel=False, retries=4)
+    if "SPY" not in frames:
+        raise RuntimeError("Impossible de télécharger SPY pour la force relative")
+    data = frames["SPY"]
     df = normalize_ohlcv(data)
     return {
         "perf_6m": pct_return(df["Close"], 126),
@@ -648,7 +679,7 @@ def send_telegram(regime: dict, candidates: list[Candidate]) -> None:
 
 
 def main() -> None:
-    print("Starting Trading Assistant v1.1")
+    print("Starting Trading Assistant v1.1.1")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -659,7 +690,7 @@ def main() -> None:
     print(f"SPY 6m: {spy_returns['perf_6m']:.2f}% | SPY 12m: {spy_returns['perf_12m']:.2f}%")
 
     symbols = download_universe()
-    frames = fetch_prices(symbols, period="2y")
+    frames = fetch_prices(symbols, period="2y", parallel=True, retries=2)
 
     funnel = {
         "Univers filtré": len(symbols),
@@ -719,7 +750,7 @@ def main() -> None:
 
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "version": "1.1",
+        "version": "1.1.1",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
