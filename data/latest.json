@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-07T07:10:51.179848+00:00",
+  "generated_at": "2026-08-07T10:00:49.458819+00:00",
   "regime": {
     "color": "VERT",
     "score": 90,
@@ -23,11 +23,117 @@
         "sma50_rising": false
       },
       "VIX": {
-        "close": 15.15,
+        "close": 15.3,
         "below_25": true
       }
     },
     "new_positions_allowed": 4
   },
-  "candidates": []
+  "candidates": [
+    {
+      "ticker": "BSCT",
+      "close": 18.52,
+      "pivot": 18.54,
+      "entry": 18.56,
+      "stop": 18.0,
+      "stop_pct": 3.0,
+      "shares": 89,
+      "position_value": 1651.7,
+      "risk_eur": 49.55,
+      "score": 99.7,
+      "distance_52w_high_pct": 0.19,
+      "avg_dollar_volume": 10434714.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "\u00c0 0.2% du plus haut 52 semaines",
+        "Volatilit\u00e9 r\u00e9cente en contraction",
+        "Volume sup\u00e9rieur \u00e0 la moyenne"
+      ]
+    },
+    {
+      "ticker": "FPEI",
+      "close": 19.18,
+      "pivot": 19.22,
+      "entry": 19.24,
+      "stop": 18.67,
+      "stop_pct": 3.0,
+      "shares": 86,
+      "position_value": 1654.98,
+      "risk_eur": 49.65,
+      "score": 99.4,
+      "distance_52w_high_pct": 0.23,
+      "avg_dollar_volume": 5788663.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "\u00c0 0.2% du plus haut 52 semaines",
+        "Volatilit\u00e9 r\u00e9cente en contraction",
+        "Volume sup\u00e9rieur \u00e0 la moyenne"
+      ]
+    },
+    {
+      "ticker": "BKLN",
+      "close": 20.5,
+      "pivot": 20.41,
+      "entry": 20.43,
+      "stop": 19.82,
+      "stop_pct": 3.0,
+      "shares": 81,
+      "position_value": 1654.86,
+      "risk_eur": 49.65,
+      "score": 99.1,
+      "distance_52w_high_pct": 0.05,
+      "avg_dollar_volume": 122815098.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "\u00c0 0.0% du plus haut 52 semaines",
+        "Volatilit\u00e9 r\u00e9cente en contraction",
+        "Volume sup\u00e9rieur \u00e0 la moyenne"
+      ]
+    },
+    {
+      "ticker": "BSAC",
+      "close": 35.7,
+      "pivot": 35.47,
+      "entry": 35.51,
+      "stop": 33.28,
+      "stop_pct": 6.26,
+      "shares": 22,
+      "position_value": 781.12,
+      "risk_eur": 48.9,
+      "score": 98.0,
+      "distance_52w_high_pct": 1.14,
+      "avg_dollar_volume": 10246710.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "\u00c0 1.1% du plus haut 52 semaines",
+        "Volatilit\u00e9 r\u00e9cente en contraction",
+        "Volume sup\u00e9rieur \u00e0 la moyenne"
+      ]
+    },
+    {
+      "ticker": "DCOM",
+      "close": 41.09,
+      "pivot": 41.37,
+      "entry": 41.41,
+      "stop": 38.38,
+      "stop_pct": 7.32,
+      "shares": 16,
+      "position_value": 662.54,
+      "risk_eur": 48.5,
+      "score": 97.4,
+      "distance_52w_high_pct": 2.1,
+      "avg_dollar_volume": 14015290.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "\u00c0 2.1% du plus haut 52 semaines",
+        "Volatilit\u00e9 r\u00e9cente en contraction",
+        "Volume sup\u00e9rieur \u00e0 la moyenne"
+      ]
+    }
+  ]
 }
