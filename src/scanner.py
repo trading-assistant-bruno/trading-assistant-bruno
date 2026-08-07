@@ -8,6 +8,7 @@ import os
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Iterable
 
@@ -27,6 +28,8 @@ DOCS = ROOT / "docs"
 DATA = ROOT / "data"
 DOCS.mkdir(exist_ok=True)
 DATA.mkdir(exist_ok=True)
+
+PARIS_TZ = ZoneInfo("Europe/Paris")
 
 
 def cfg(section: str, key: str, default):
@@ -74,6 +77,7 @@ class Candidate:
     next_earnings_date: str | None = None
     earnings_days: int | None = None
     earnings_status: str = "INCONNU"
+    earnings_source: str = "INCONNU"
     chart_validation_score: float = 0.0
     final_decision: str = "À ANALYSER"
     final_reason: str = ""
@@ -1343,80 +1347,403 @@ def fetch_company_metadata(ticker: str) -> dict:
     return result
 
 
-def fetch_next_earnings(ticker: str) -> dict:
-    """
-    Best-effort next earnings date from Yahoo/yfinance.
-    Unknown earnings are deliberately treated conservatively downstream.
-    """
-    now = pd.Timestamp.now(tz="UTC")
-    future_dates: list[pd.Timestamp] = []
-    tk = yf.Ticker(ticker)
+def _earnings_result(
+    next_date: pd.Timestamp,
+    now: pd.Timestamp,
+    source: str,
+) -> dict:
+    """Construit un résultat homogène à partir d'une date connue."""
+    next_date = _to_utc_timestamp(next_date)
 
-    # 1) Calendar endpoint
-    try:
-        calendar = tk.calendar
-
-        values = []
-        if isinstance(calendar, dict):
-            for key, value in calendar.items():
-                if "earning" in str(key).lower():
-                    if isinstance(value, (list, tuple)):
-                        values.extend(value)
-                    else:
-                        values.append(value)
-        elif isinstance(calendar, pd.DataFrame):
-            for label in list(calendar.index) + list(calendar.columns):
-                if "earning" in str(label).lower():
-                    try:
-                        if label in calendar.index:
-                            values.extend(calendar.loc[label].tolist())
-                        if label in calendar.columns:
-                            values.extend(calendar[label].tolist())
-                    except Exception:
-                        pass
-
-        for value in values:
-            ts = _to_utc_timestamp(value)
-            if ts is not None and ts >= now - pd.Timedelta(days=1):
-                future_dates.append(ts)
-
-    except Exception as exc:
-        print(f"{ticker}: calendar earnings unavailable: {exc}")
-
-    # 2) Earnings history/forecast endpoint fallback
-    try:
-        earnings_dates = tk.get_earnings_dates(limit=8)
-        if earnings_dates is not None and not earnings_dates.empty:
-            for value in earnings_dates.index:
-                ts = _to_utc_timestamp(value)
-                if ts is not None and ts >= now - pd.Timedelta(days=1):
-                    future_dates.append(ts)
-    except Exception as exc:
-        print(f"{ticker}: earnings dates fallback unavailable: {exc}")
-
-    if not future_dates:
+    if next_date is None:
         return {
             "next_earnings_date": None,
             "earnings_days": None,
             "earnings_status": "INCONNU",
+            "earnings_source": "INCONNU",
         }
 
-    next_date = min(future_dates)
-    days = int((next_date.normalize() - now.normalize()).days)
-
-    block_days = int(
-        CONFIG.get("validation", {}).get("earnings_block_days", 7)
+    days = int(
+        (
+            next_date.normalize()
+            - now.normalize()
+        ).days
     )
 
-    if days <= block_days:
-        status = "PROCHE"
-    else:
-        status = "OK"
+    block_days = int(
+        CONFIG.get(
+            "validation",
+            {},
+        ).get(
+            "earnings_block_days",
+            7,
+        )
+    )
+
+    status = (
+        "PROCHE"
+        if days <= block_days
+        else "OK"
+    )
 
     return {
         "next_earnings_date": next_date.date().isoformat(),
         "earnings_days": days,
         "earnings_status": status,
+        "earnings_source": source,
+    }
+
+
+def _previous_earnings_from_latest(
+    ticker: str,
+    now: pd.Timestamp,
+) -> dict | None:
+    """
+    Reprend la dernière date valide présente dans data/latest.json.
+
+    Cela évite qu'une panne Yahoo ponctuelle transforme une date connue
+    la veille en "INCONNU". Le cache est volontairement limité dans le
+    temps et n'est utilisé que si la date est encore future.
+    """
+    latest_path = DATA / "latest.json"
+
+    if not latest_path.exists():
+        return None
+
+    try:
+        payload = json.loads(
+            latest_path.read_text(
+                encoding="utf-8"
+            )
+        )
+    except Exception as exc:
+        print(
+            f"{ticker}: previous latest.json unreadable: {exc}"
+        )
+        return None
+
+    generated_at = payload.get(
+        "generated_at"
+    )
+
+    if not generated_at:
+        return None
+
+    try:
+        generated_ts = pd.Timestamp(
+            generated_at
+        )
+
+        if generated_ts.tzinfo is None:
+            generated_ts = generated_ts.tz_localize(
+                "UTC"
+            )
+        else:
+            generated_ts = generated_ts.tz_convert(
+                "UTC"
+            )
+    except Exception:
+        return None
+
+    cache_max_age_days = int(
+        CONFIG.get(
+            "validation",
+            {},
+        ).get(
+            "earnings_cache_max_age_days",
+            14,
+        )
+    )
+
+    cache_age_days = (
+        now - generated_ts
+    ).total_seconds() / 86400
+
+    if (
+        cache_age_days < 0
+        or cache_age_days > cache_max_age_days
+    ):
+        return None
+
+    for candidate in payload.get(
+        "candidates",
+        [],
+    ):
+        if str(
+            candidate.get(
+                "ticker",
+                "",
+            )
+        ).upper() != ticker.upper():
+            continue
+
+        date_value = candidate.get(
+            "next_earnings_date"
+        )
+
+        if not date_value:
+            return None
+
+        date_ts = _to_utc_timestamp(
+            date_value
+        )
+
+        if date_ts is None:
+            return None
+
+        # Une ancienne date passée n'est jamais recyclée.
+        if (
+            date_ts.normalize()
+            < now.normalize()
+        ):
+            return None
+
+        result = _earnings_result(
+            date_ts,
+            now,
+            "CACHE RÉCENT",
+        )
+
+        print(
+            f"{ticker}: earnings fallback from previous scan "
+            f"({result['next_earnings_date']})"
+        )
+
+        return result
+
+    return None
+
+
+def fetch_next_earnings(
+    ticker: str,
+) -> dict:
+    """
+    Date de résultats robuste.
+
+    Ordre :
+    1) Yahoo calendar
+    2) Yahoo earnings_dates
+    3) retries automatiques
+    4) dernière date valide du précédent latest.json
+
+    Si aucune source récente n'est disponible, le statut reste INCONNU
+    et l'achat est bloqué par prudence.
+    """
+    now = pd.Timestamp.now(
+        tz="UTC"
+    )
+
+    retries = int(
+        CONFIG.get(
+            "validation",
+            {},
+        ).get(
+            "earnings_fetch_retries",
+            3,
+        )
+    )
+
+    retry_pause = float(
+        CONFIG.get(
+            "validation",
+            {},
+        ).get(
+            "earnings_retry_pause_seconds",
+            0.8,
+        )
+    )
+
+    future_dates: list[pd.Timestamp] = []
+
+    for attempt in range(
+        1,
+        retries + 1,
+    ):
+        tk = yf.Ticker(
+            ticker
+        )
+
+        # 1) Calendar
+        try:
+            calendar = tk.calendar
+            values = []
+
+            if isinstance(
+                calendar,
+                dict,
+            ):
+                for key, value in calendar.items():
+                    if "earning" not in str(
+                        key
+                    ).lower():
+                        continue
+
+                    if isinstance(
+                        value,
+                        (
+                            list,
+                            tuple,
+                        ),
+                    ):
+                        values.extend(
+                            value
+                        )
+                    else:
+                        values.append(
+                            value
+                        )
+
+            elif isinstance(
+                calendar,
+                pd.DataFrame,
+            ):
+                labels = (
+                    list(
+                        calendar.index
+                    )
+                    + list(
+                        calendar.columns
+                    )
+                )
+
+                for label in labels:
+                    if "earning" not in str(
+                        label
+                    ).lower():
+                        continue
+
+                    try:
+                        if label in calendar.index:
+                            row = calendar.loc[
+                                label
+                            ]
+
+                            if hasattr(
+                                row,
+                                "tolist",
+                            ):
+                                values.extend(
+                                    row.tolist()
+                                )
+                            else:
+                                values.append(
+                                    row
+                                )
+
+                        if label in calendar.columns:
+                            col = calendar[
+                                label
+                            ]
+
+                            if hasattr(
+                                col,
+                                "tolist",
+                            ):
+                                values.extend(
+                                    col.tolist()
+                                )
+                            else:
+                                values.append(
+                                    col
+                                )
+                    except Exception:
+                        pass
+
+            for value in values:
+                ts = _to_utc_timestamp(
+                    value
+                )
+
+                if (
+                    ts is not None
+                    and ts
+                    >= now
+                    - pd.Timedelta(
+                        days=1
+                    )
+                ):
+                    future_dates.append(
+                        ts
+                    )
+
+        except Exception as exc:
+            print(
+                f"{ticker}: calendar earnings attempt "
+                f"{attempt}/{retries} unavailable: {exc}"
+            )
+
+        # 2) Earnings forecast/history fallback
+        try:
+            earnings_dates = (
+                tk.get_earnings_dates(
+                    limit=12
+                )
+            )
+
+            if (
+                earnings_dates is not None
+                and not earnings_dates.empty
+            ):
+                for value in earnings_dates.index:
+                    ts = _to_utc_timestamp(
+                        value
+                    )
+
+                    if (
+                        ts is not None
+                        and ts
+                        >= now
+                        - pd.Timedelta(
+                            days=1
+                        )
+                    ):
+                        future_dates.append(
+                            ts
+                        )
+
+        except Exception as exc:
+            print(
+                f"{ticker}: earnings dates attempt "
+                f"{attempt}/{retries} unavailable: {exc}"
+            )
+
+        # Une date valide suffit : inutile de solliciter Yahoo davantage.
+        if future_dates:
+            break
+
+        if attempt < retries:
+            time.sleep(
+                retry_pause
+                * attempt
+            )
+
+    if future_dates:
+        next_date = min(
+            future_dates
+        )
+
+        return _earnings_result(
+            next_date,
+            now,
+            "YAHOO",
+        )
+
+    # 3) Cache du scan précédent
+    cached = (
+        _previous_earnings_from_latest(
+            ticker,
+            now,
+        )
+    )
+
+    if cached is not None:
+        return cached
+
+    return {
+        "next_earnings_date": None,
+        "earnings_days": None,
+        "earnings_status": "INCONNU",
+        "earnings_source": "INCONNU",
     }
 
 
@@ -1605,6 +1932,7 @@ def enrich_finalist(candidate: Candidate) -> Candidate:
     candidate.next_earnings_date = earnings["next_earnings_date"]
     candidate.earnings_days = earnings["earnings_days"]
     candidate.earnings_status = earnings["earnings_status"]
+    candidate.earnings_source = earnings["earnings_source"]
     candidate.chart_validation_score = compute_chart_validation_score(candidate)
     candidate.final_decision, candidate.final_reason = decide_final_action(candidate)
 
@@ -1705,14 +2033,14 @@ a{color:var(--blue);font-weight:700}
 <body>
 <main>
 
-<h1>Trading Assistant — v1.3.1</h1>
+<h1>Trading Assistant — v1.3.2</h1>
 
 <div id="freshness" class="fresh">Vérification de la fraîcheur des données…</div>
 
 <div class="card">
   <div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
   <p><b>{{ regime.score }}/100</b> — positions nouvelles autorisées par le régime : <b>{{ regime.new_positions_allowed }}</b></p>
-  <small>Scan : {{ generated_at }} · EUR/USD {{ eurusd }}</small>
+  <small>Scan : {{ generated_at }} heure de Paris · EUR/USD {{ eurusd }}</small>
 </div>
 
 <div class="card hero">
@@ -1763,7 +2091,7 @@ a{color:var(--blue);font-weight:700}
     <span class="badge">Base {{ c.base_quality_score }}/100</span>
     <span class="badge">Validation {{ c.chart_validation_score }}/100</span>
     <span class="badge">RS {{ c.rs_rank }}/99</span>
-    <span class="badge">Résultats {{ c.next_earnings_date or 'INCONNUS' }}</span>
+    <span class="badge">Résultats {{ c.next_earnings_date or 'INCONNUS' }} · {{ c.earnings_source }}</span>
   </div>
 </div>
 {% endfor %}
@@ -1781,6 +2109,8 @@ a{color:var(--blue);font-weight:700}
     <div class="metric"><small>Déclenchement</small><b>{{ c.entry_trigger }} $</b></div>
     <div class="metric"><small>Base / validation</small><b>{{ c.base_quality_score }} / {{ c.chart_validation_score }}</b></div>
     <div class="metric"><small>RS Rank</small><b>{{ c.rs_rank }}/99</b></div>
+    <div class="metric"><small>Résultats</small><b>{{ c.next_earnings_date or 'INCONNU' }}</b></div>
+    <div class="metric"><small>Source résultats</small><b>{{ c.earnings_source }}</b></div>
   </div>
 </div>
 {% endfor %}
@@ -1818,7 +2148,7 @@ a{color:var(--blue);font-weight:700}
         <div class="metric"><small>Stop</small><b>{{ c.stop }} $ ({{ c.stop_pct }}%)</b></div>
         <div class="metric"><small>Qualité base</small><b>{{ c.base_quality_score }}/100</b></div>
         <div class="metric"><small>Validation graphique</small><b>{{ c.chart_validation_score }}/100</b></div>
-        <div class="metric"><small>Résultats</small><b>{{ c.next_earnings_date or 'INCONNU' }}</b></div>
+        <div class="metric"><small>Résultats</small><b>{{ c.next_earnings_date or 'INCONNU' }} · {{ c.earnings_source }}</b></div>
         <div class="metric"><small>RS Rank</small><b>{{ c.rs_rank }}/99</b></div>
       </div>
 
@@ -1942,7 +2272,7 @@ def send_telegram(
     ]
 
     lines = [
-        "📈 Trading Assistant v1.3.1",
+        "📈 Trading Assistant v1.3.2",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         "",
     ]
@@ -1979,7 +2309,7 @@ def send_telegram(
         print(f"Telegram error: {exc}")
 
 def main() -> None:
-    print("Starting Trading Assistant v1.3.1")
+    print("Starting Trading Assistant v1.3.2")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -2141,12 +2471,12 @@ def main() -> None:
 
     next_watch = watch_candidates[:3]
 
-    generated_at_dt = datetime.now().astimezone()
+    generated_at_dt = datetime.now(PARIS_TZ)
     generated_at_iso = generated_at_dt.isoformat()
 
     payload = {
         "generated_at": generated_at_iso,
-        "version": "1.3.1",
+        "version": "1.3.2",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {

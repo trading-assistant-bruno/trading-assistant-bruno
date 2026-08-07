@@ -48,3 +48,6 @@ validation:
   min_final_base_quality_score: 70
   max_data_age_hours: 18
   metadata_pause_seconds: 0.30
+  earnings_fetch_retries: 3
+  earnings_retry_pause_seconds: 0.80
+  earnings_cache_max_age_days: 14
