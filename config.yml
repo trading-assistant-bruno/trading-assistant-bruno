@@ -51,3 +51,16 @@ validation:
   earnings_fetch_retries: 3
   earnings_retry_pause_seconds: 0.80
   earnings_cache_max_age_days: 14
+
+
+corporate_events:
+  enabled: true
+  news_lookback_days: 180
+
+  # Filet de sécurité pour événements déjà vérifiés.
+  # Une opération de rachat annoncée peut rendre le comportement du titre
+  # très différent d'un breakout momentum classique.
+  manual_exclude_tickers:
+    OGN:
+      type: "M&A / ACQUISITION"
+      reason: "Accord définitif de rachat de Organon par Sun Pharma à 14 USD par action ; titre exclu de la stratégie swing momentum tant que l'opération reste en cours."
