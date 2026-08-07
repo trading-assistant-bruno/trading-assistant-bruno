@@ -1,887 +1,237 @@
 
 <!doctype html>
-
 <html lang="fr">
-
 <head>
-
 <meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
-<title>
-Trading Assistant Bruno
-</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Assistant Bruno</title>
 <style>
-
-body {
-    font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-
-    background:#f5f7fa;
-    margin:0;
-    color:#18212f;
-}
-
-main {
-    max-width:820px;
-    margin:auto;
-    padding:18px;
-}
-
-.card {
-    background:white;
-    border-radius:16px;
-    padding:18px;
-    margin:14px 0;
-    box-shadow:
-        0 3px 18px
-        #00000012;
-}
-
-h1 {
-    font-size:24px;
-}
-
-.regime {
-    font-size:28px;
-    font-weight:800;
-}
-
-.VERT {
-    color:#138a42;
-}
-
-.ORANGE {
-    color:#c46b00;
-}
-
-.ROUGE {
-    color:#c62828;
-}
-
-.grid {
-    display:grid;
-    grid-template-columns:
-        repeat(2,1fr);
-    gap:10px;
-}
-
-.metric {
-    background:#f4f6f8;
-    border-radius:10px;
-    padding:10px;
-}
-
-.ticker {
-    font-size:22px;
-    font-weight:800;
-}
-
-.score {
-    float:right;
-}
-
-.buy {
-    font-size:18px;
-    font-weight:700;
-}
-
-small {
-    color:#667085;
-}
-
-ul {
-    padding-left:20px;
-}
-
-@media(max-width:600px) {
-
-    .grid {
-        grid-template-columns:1fr;
-    }
-
-}
-
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;margin:0;color:#18212f}
+main{max-width:860px;margin:auto;padding:18px}
+.card{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 18px #00000012}
+h1{font-size:24px}.regime{font-size:28px;font-weight:800}
+.VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.metric{background:#f4f6f8;border-radius:10px;padding:10px}
+.ticker{font-size:22px;font-weight:800}.score{float:right}
+.status{font-size:18px;font-weight:800;margin-top:8px}
+small{color:#667085}ul{padding-left:20px}
+table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #eee}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
 </style>
-
 </head>
-
-<body>
-
-<main>
-
-<h1>
-Trading Assistant Bruno
-</h1>
+<body><main>
+<h1>Trading Assistant Bruno</h1>
 
 <div class="card">
-
-<div class="regime VERT">
-
-● Marché VERT
-
+<div class="regime VERT">● Marché VERT</div>
+<p>Score de régime : 90/100 — nouvelles positions autorisées : 4</p>
+<p>EUR/USD utilisé : 1.1533</p>
+<small>Calculé le 07/08/2026 11:24</small>
 </div>
 
-<p>
+<div class="card">
+<h2>Entonnoir du scan</h2>
+<table>
 
-Score de régime :
-90/100
+<tr><td>Univers filtré</td><td><b>5000</b></td></tr>
 
-—
+<tr><td>Données téléchargées</td><td><b>4998</b></td></tr>
 
-Nouvelles positions autorisées :
-4
+<tr><td>Historique insuffisant</td><td><b>446</b></td></tr>
 
-</p>
+<tr><td>Prix minimum</td><td><b>1243</b></td></tr>
 
-<small>
+<tr><td>Liquidité</td><td><b>999</b></td></tr>
 
-Calculé le
-07/08/2026 10:14
+<tr><td>Trend template</td><td><b>1534</b></td></tr>
 
-</small>
+<tr><td>MM200 montante</td><td><b>15</b></td></tr>
 
+<tr><td>Proximité 52 semaines</td><td><b>9</b></td></tr>
+
+<tr><td>Momentum 6 mois</td><td><b>24</b></td></tr>
+
+<tr><td>Force relative vs SPY</td><td><b>197</b></td></tr>
+
+<tr><td>Pivot / stop / taille</td><td><b>7</b></td></tr>
+
+<tr><td>Retenus</td><td><b>524</b></td></tr>
+
+<tr><td>Erreurs</td><td><b>0</b></td></tr>
+
+</table>
 </div>
-
-
-
-
-
-
 
 
 
 
 <div class="card">
-
-<div class="ticker">
-
-1.
-ROKU
-
-<span class="score">
-98.2/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-149.03 $
-
-</p>
+<div class="ticker">1. ROKU <span class="score">99.9/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>150.07 $</b> — pivot : <b>148.88 $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-148.88 $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>149.03 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>151.11 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>140.96 $</b> (5.41%)</div>
+<div class="metric"><small>Taille</small><br><b>7 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>48.97 €</b></div>
+<div class="metric"><small>Position</small><br><b>1043.2 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>62.89%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>44.66%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-140.96 $
-</b>
-
-(5.41%)
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 62.9%</li><li>RS 6 mois vs SPY : +44.7%</li><li>À 0.4% du plus haut 52 semaines</li><li>Volatilité récente en contraction</li><li>Volume 1.4× la moyenne 20j</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=ROKU" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
-
-
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-6 actions
-</b>
-
-</div>
-
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-48.4 €
-</b>
-
-</div>
-
-</div>
-
-
-<ul>
-
-
-
-<li>
-Cours > MM50 > MM150 > MM200
-</li>
-
-
-
-<li>
-MM200 montante
-</li>
-
-
-
-<li>
-À 0.4% du plus haut 52 semaines
-</li>
-
-
-
-<li>
-Volatilité récente en contraction
-</li>
-
-
-
-<li>
-Volume supérieur à la moyenne
-</li>
-
-
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol=ROKU"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
-</div>
-
-
 
 <div class="card">
-
-<div class="ticker">
-
-2.
-BSAC
-
-<span class="score">
-98.0/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-35.51 $
-
-</p>
+<div class="ticker">2. KOP <span class="score">94.5/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>52.33 $</b> — pivot : <b>52.25 $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-35.47 $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>52.3 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>53.03 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>48.12 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>13 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>47.17 €</b></div>
+<div class="metric"><small>Position</small><br><b>679.93 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>68.38%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>49.54%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-33.28 $
-</b>
-
-(6.26%)
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 68.4%</li><li>RS 6 mois vs SPY : +49.5%</li><li>À 1.3% du plus haut 52 semaines</li><li>Volume 1.7× la moyenne 20j</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=KOP" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
-
-
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-22 actions
-</b>
-
-</div>
-
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-48.9 €
-</b>
-
-</div>
-
-</div>
-
-
-<ul>
-
-
-
-<li>
-Cours > MM50 > MM150 > MM200
-</li>
-
-
-
-<li>
-MM200 montante
-</li>
-
-
-
-<li>
-À 1.1% du plus haut 52 semaines
-</li>
-
-
-
-<li>
-Volatilité récente en contraction
-</li>
-
-
-
-<li>
-Volume supérieur à la moyenne
-</li>
-
-
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol=BSAC"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
-</div>
-
-
 
 <div class="card">
-
-<div class="ticker">
-
-3.
-DCOM
-
-<span class="score">
-97.4/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-41.41 $
-
-</p>
+<div class="ticker">3. LILAK <span class="score">93.7/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>8.56 $</b> — pivot : <b>8.45 $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-41.37 $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>8.46 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>8.58 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>7.78 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>85 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>49.87 €</b></div>
+<div class="metric"><small>Position</small><br><b>718.97 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>60.92%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>42.92%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-38.38 $
-</b>
-
-(7.32%)
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 60.9%</li><li>RS 6 mois vs SPY : +42.9%</li><li>À 3.2% du plus haut 52 semaines</li><li>Volume 1.7× la moyenne 20j</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=LILAK" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
-
-
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-16 actions
-</b>
-
-</div>
-
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-48.5 €
-</b>
-
-</div>
-
-</div>
-
-
-<ul>
-
-
-
-<li>
-Cours > MM50 > MM150 > MM200
-</li>
-
-
-
-<li>
-MM200 montante
-</li>
-
-
-
-<li>
-À 2.1% du plus haut 52 semaines
-</li>
-
-
-
-<li>
-Volatilité récente en contraction
-</li>
-
-
-
-<li>
-Volume supérieur à la moyenne
-</li>
-
-
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol=DCOM"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
-</div>
-
-
 
 <div class="card">
-
-<div class="ticker">
-
-4.
-SAIC
-
-<span class="score">
-97.3/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-123.13 $
-
-</p>
+<div class="ticker">4. RELY <span class="score">93.2/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>25.93 $</b> — pivot : <b>25.75 $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-123.01 $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>25.78 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>26.14 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>23.71 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>27 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>48.28 €</b></div>
+<div class="metric"><small>Position</small><br><b>695.95 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>101.48%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>78.93%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-113.28 $
-</b>
-
-(8.0%)
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 101.5%</li><li>RS 6 mois vs SPY : +78.9%</li><li>À 4.5% du plus haut 52 semaines</li><li>Volume 3.2× la moyenne 20j</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=RELY" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
-
-
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-5 actions
-</b>
-
-</div>
-
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-49.25 €
-</b>
-
-</div>
-
-</div>
-
-
-<ul>
-
-
-
-<li>
-Cours > MM50 > MM150 > MM200
-</li>
-
-
-
-<li>
-MM200 montante
-</li>
-
-
-
-<li>
-À 1.1% du plus haut 52 semaines
-</li>
-
-
-
-<li>
-Volatilité récente en contraction
-</li>
-
-
-
-<li>
-Volume supérieur à la moyenne
-</li>
-
-
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol=SAIC"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
-</div>
-
-
 
 <div class="card">
-
-<div class="ticker">
-
-5.
-GHRS
-
-<span class="score">
-97.0/100
-</span>
-
-</div>
-
-<p class="buy">
-
-Ordre conditionnel :
-achat stop-limit autour de
-31.03 $
-
-</p>
+<div class="ticker">5. KOD <span class="score">93.0/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>45.4 $</b> — pivot : <b>44.85 $</b></p>
 
 <div class="grid">
-
-<div class="metric">
-
-<small>
-Pivot
-</small>
-
-<br>
-
-<b>
-31.0 $
-</b>
-
+<div class="metric"><small>Déclenchement</small><br><b>44.89 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>45.52 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>41.3 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>16 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>49.83 €</b></div>
+<div class="metric"><small>Position</small><br><b>718.32 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>102.86%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>80.16%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Stop initial
-</small>
-
-<br>
-
-<b>
-28.55 $
-</b>
-
-(8.0%)
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 102.9%</li><li>RS 6 mois vs SPY : +80.2%</li><li>À 5.1% du plus haut 52 semaines</li><li>Volatilité récente en contraction</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=KOD" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
 
+<div class="card">
+<div class="ticker">6. NRIX <span class="score">92.7/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>25.22 $</b> — pivot : <b>25.08 $</b></p>
 
-<div class="metric">
-
-<small>
-Taille
-</small>
-
-<br>
-
-<b>
-20 actions
-</b>
-
+<div class="grid">
+<div class="metric"><small>Déclenchement</small><br><b>25.11 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>25.46 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>23.1 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>28 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>48.77 €</b></div>
+<div class="metric"><small>Position</small><br><b>703.08 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>52.39%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>35.34%</b></div>
 </div>
 
-
-<div class="metric">
-
-<small>
-Risque estimé
-</small>
-
-<br>
-
-<b>
-49.65 €
-</b>
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 52.4%</li><li>RS 6 mois vs SPY : +35.3%</li><li>À 1.1% du plus haut 52 semaines</li><li>Volatilité récente en contraction</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=NRIX" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
 
+<div class="card">
+<div class="ticker">7. CBRL <span class="score">92.6/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>58.22 $</b> — pivot : <b>57.43 $</b></p>
+
+<div class="grid">
+<div class="metric"><small>Déclenchement</small><br><b>57.49 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>58.29 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>52.89 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>12 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>47.85 €</b></div>
+<div class="metric"><small>Position</small><br><b>689.85 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>77.45%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>57.6%</b></div>
 </div>
 
-
-<ul>
-
-
-
-<li>
-Cours > MM50 > MM150 > MM200
-</li>
-
-
-
-<li>
-MM200 montante
-</li>
-
-
-
-<li>
-À 1.2% du plus haut 52 semaines
-</li>
-
-
-
-<li>
-Volatilité récente en contraction
-</li>
-
-
-
-<li>
-Volume supérieur à la moyenne
-</li>
-
-
-
-</ul>
-
-
-<p>
-
-<a
-href="https://www.tradingview.com/chart/?symbol=GHRS"
-target="_blank"
->
-
-Ouvrir le graphique
-
-</a>
-
-</p>
-
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 77.5%</li><li>RS 6 mois vs SPY : +57.6%</li><li>À 6.0% du plus haut 52 semaines</li><li>Volatilité récente en contraction</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=CBRL" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
 
+<div class="card">
+<div class="ticker">8. MBX <span class="score">87.0/100</span></div>
+<div class="status">ACHAT POSSIBLE</div>
+<p>Cours : <b>67.11 $</b> — pivot : <b>66.66 $</b></p>
 
+<div class="grid">
+<div class="metric"><small>Déclenchement</small><br><b>66.73 $</b></div>
+<div class="metric"><small>Zone d'achat max</small><br><b>67.66 $</b></div>
+<div class="metric"><small>Stop initial</small><br><b>61.39 $</b> (8.0%)</div>
+<div class="metric"><small>Taille</small><br><b>10 actions</b></div>
+<div class="metric"><small>Risque réel</small><br><b>46.29 €</b></div>
+<div class="metric"><small>Position</small><br><b>667.27 $</b></div>
+<div class="metric"><small>Perf. 6 mois</small><br><b>74.9%</b></div>
+<div class="metric"><small>RS 6m vs SPY</small><br><b>55.33%</b></div>
+</div>
+
+<ul><li>Cours > MM50 > MM150 > MM200</li><li>MM200 montante</li><li>Performance 6 mois : 74.9%</li><li>RS 6 mois vs SPY : +55.3%</li><li>À 7.6% du plus haut 52 semaines</li></ul>
+<p><a href="https://www.tradingview.com/chart/?symbol=MBX" target="_blank">Ouvrir dans TradingView</a></p>
+</div>
 
 
 <div class="card">
-
 <small>
-
-Prototype d'aide à la décision.
-
-Les niveaux sont calculés mécaniquement
-sur données quotidiennes et doivent être
-vérifiés avant tout ordre réel.
-
+Le score est un classement technique, pas une probabilité de gain.
+Cette version ne vérifie pas encore automatiquement les résultats d'entreprise ni la qualité visuelle VCP/flat base.
+Aucun ordre n'est envoyé au broker.
 </small>
-
 </div>
-
-</main>
-
-</body>
-
-</html>
+</main></body></html>
