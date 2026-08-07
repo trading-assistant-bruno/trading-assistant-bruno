@@ -1394,54 +1394,229 @@ def _earnings_result(
     }
 
 
-def _previous_earnings_from_latest(
+def _earnings_cache_path() -> Path:
+    return DATA / "earnings_cache.json"
+
+
+def _load_earnings_cache() -> dict:
+    """
+    Charge le cache persistant des dates de résultats.
+
+    Structure :
+    {
+      "version": 1,
+      "tickers": {
+        "RAMP": {
+          "date": "2026-11-04",
+          "confirmed_at": "...",
+          "provider": "YAHOO"
+        }
+      }
+    }
+    """
+    path = _earnings_cache_path()
+
+    if not path.exists():
+        return {
+            "version": 1,
+            "tickers": {},
+        }
+
+    try:
+        payload = json.loads(
+            path.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise ValueError(
+                "cache root is not a dict"
+            )
+
+        payload.setdefault(
+            "version",
+            1,
+        )
+
+        payload.setdefault(
+            "tickers",
+            {},
+        )
+
+        return payload
+
+    except Exception as exc:
+        print(
+            f"Earnings cache unreadable: {exc}"
+        )
+
+        return {
+            "version": 1,
+            "tickers": {},
+        }
+
+
+def _save_earnings_cache(
+    cache: dict,
+) -> None:
+    """
+    Écrit le cache sur disque.
+
+    Important : ce fichier doit être ajouté au commit GitHub Actions
+    pour survivre à l'exécution suivante.
+    """
+    path = _earnings_cache_path()
+
+    cache["version"] = 1
+
+    cache["updated_at"] = (
+        datetime
+        .now(PARIS_TZ)
+        .isoformat()
+    )
+
+    cache.setdefault(
+        "tickers",
+        {},
+    )
+
+    path.write_text(
+        json.dumps(
+            cache,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _cache_confirmed_earnings(
+    ticker: str,
+    date_value,
+    provider: str = "YAHOO",
+) -> None:
+    """
+    Enregistre UNIQUEMENT une date valide.
+
+    Une réponse Yahoo vide ou en erreur ne supprime jamais
+    une date déjà connue.
+    """
+    ts = _to_utc_timestamp(
+        date_value
+    )
+
+    if ts is None:
+        return
+
+    cache = _load_earnings_cache()
+
+    tickers = cache.setdefault(
+        "tickers",
+        {},
+    )
+
+    tickers[
+        ticker.upper()
+    ] = {
+        "date": ts.date().isoformat(),
+        "confirmed_at": (
+            datetime
+            .now(PARIS_TZ)
+            .isoformat()
+        ),
+        "provider": provider,
+    }
+
+    _save_earnings_cache(
+        cache
+    )
+
+
+def _cached_earnings(
     ticker: str,
     now: pd.Timestamp,
 ) -> dict | None:
     """
-    Reprend la dernière date valide présente dans data/latest.json.
+    Utilise une date de résultats précédemment confirmée si :
+    - elle est encore future ;
+    - sa confirmation n'est pas trop ancienne.
 
-    Cela évite qu'une panne Yahoo ponctuelle transforme une date connue
-    la veille en "INCONNU". Le cache est volontairement limité dans le
-    temps et n'est utilisé que si la date est encore future.
+    Une date passée est supprimée du cache afin d'éviter tout recyclage.
     """
-    latest_path = DATA / "latest.json"
+    cache = _load_earnings_cache()
 
-    if not latest_path.exists():
-        return None
-
-    try:
-        payload = json.loads(
-            latest_path.read_text(
-                encoding="utf-8"
-            )
-        )
-    except Exception as exc:
-        print(
-            f"{ticker}: previous latest.json unreadable: {exc}"
-        )
-        return None
-
-    generated_at = payload.get(
-        "generated_at"
+    tickers = cache.setdefault(
+        "tickers",
+        {},
     )
 
-    if not generated_at:
+    key = ticker.upper()
+
+    entry = tickers.get(
+        key
+    )
+
+    if not isinstance(
+        entry,
+        dict,
+    ):
+        return None
+
+    date_value = entry.get(
+        "date"
+    )
+
+    confirmed_at = entry.get(
+        "confirmed_at"
+    )
+
+    if (
+        not date_value
+        or not confirmed_at
+    ):
+        return None
+
+    date_ts = _to_utc_timestamp(
+        date_value
+    )
+
+    if date_ts is None:
+        return None
+
+    # Ne jamais réutiliser une date passée.
+    if (
+        date_ts.normalize()
+        < now.normalize()
+    ):
+        tickers.pop(
+            key,
+            None,
+        )
+
+        _save_earnings_cache(
+            cache
+        )
+
         return None
 
     try:
-        generated_ts = pd.Timestamp(
-            generated_at
+        confirmed_ts = pd.Timestamp(
+            confirmed_at
         )
 
-        if generated_ts.tzinfo is None:
-            generated_ts = generated_ts.tz_localize(
+        if confirmed_ts.tzinfo is None:
+            confirmed_ts = confirmed_ts.tz_localize(
                 "UTC"
             )
         else:
-            generated_ts = generated_ts.tz_convert(
+            confirmed_ts = confirmed_ts.tz_convert(
                 "UTC"
             )
+
     except Exception:
         return None
 
@@ -1456,7 +1631,7 @@ def _previous_earnings_from_latest(
     )
 
     cache_age_days = (
-        now - generated_ts
+        now - confirmed_ts
     ).total_seconds() / 86400
 
     if (
@@ -1465,53 +1640,18 @@ def _previous_earnings_from_latest(
     ):
         return None
 
-    for candidate in payload.get(
-        "candidates",
-        [],
-    ):
-        if str(
-            candidate.get(
-                "ticker",
-                "",
-            )
-        ).upper() != ticker.upper():
-            continue
+    result = _earnings_result(
+        date_ts,
+        now,
+        "CACHE",
+    )
 
-        date_value = candidate.get(
-            "next_earnings_date"
-        )
+    print(
+        f"{ticker}: earnings from persistent cache "
+        f"({result['next_earnings_date']})"
+    )
 
-        if not date_value:
-            return None
-
-        date_ts = _to_utc_timestamp(
-            date_value
-        )
-
-        if date_ts is None:
-            return None
-
-        # Une ancienne date passée n'est jamais recyclée.
-        if (
-            date_ts.normalize()
-            < now.normalize()
-        ):
-            return None
-
-        result = _earnings_result(
-            date_ts,
-            now,
-            "CACHE RÉCENT",
-        )
-
-        print(
-            f"{ticker}: earnings fallback from previous scan "
-            f"({result['next_earnings_date']})"
-        )
-
-        return result
-
-    return None
+    return result
 
 
 def fetch_next_earnings(
@@ -1524,7 +1664,7 @@ def fetch_next_earnings(
     1) Yahoo calendar
     2) Yahoo earnings_dates
     3) retries automatiques
-    4) dernière date valide du précédent latest.json
+    4) cache persistant data/earnings_cache.json
 
     Si aucune source récente n'est disponible, le statut reste INCONNU
     et l'achat est bloqué par prudence.
@@ -1722,18 +1862,23 @@ def fetch_next_earnings(
             future_dates
         )
 
+        # Une confirmation Yahoo valide nourrit le cache persistant.
+        _cache_confirmed_earnings(
+            ticker,
+            next_date,
+            "YAHOO",
+        )
+
         return _earnings_result(
             next_date,
             now,
             "YAHOO",
         )
 
-    # 3) Cache du scan précédent
-    cached = (
-        _previous_earnings_from_latest(
-            ticker,
-            now,
-        )
+    # 3) Cache persistant
+    cached = _cached_earnings(
+        ticker,
+        now,
     )
 
     if cached is not None:
@@ -2033,7 +2178,7 @@ a{color:var(--blue);font-weight:700}
 <body>
 <main>
 
-<h1>Trading Assistant — v1.3.2</h1>
+<h1>Trading Assistant — v1.3.3</h1>
 
 <div id="freshness" class="fresh">Vérification de la fraîcheur des données…</div>
 
@@ -2272,7 +2417,7 @@ def send_telegram(
     ]
 
     lines = [
-        "📈 Trading Assistant v1.3.2",
+        "📈 Trading Assistant v1.3.3",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         "",
     ]
@@ -2309,7 +2454,10 @@ def send_telegram(
         print(f"Telegram error: {exc}")
 
 def main() -> None:
-    print("Starting Trading Assistant v1.3.2")
+    print("Starting Trading Assistant v1.3.3")
+
+    # Garantit l’existence du cache persistant pour le commit GitHub.
+    _save_earnings_cache(_load_earnings_cache())
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -2476,7 +2624,7 @@ def main() -> None:
 
     payload = {
         "generated_at": generated_at_iso,
-        "version": "1.3.2",
+        "version": "1.3.3",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {

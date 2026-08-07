@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-07T13:00:27.307145+00:00",
+  "tickers": {
+    "ROKU": {
+      "date": "2026-11-05",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "BY": {
+      "date": "2026-10-22",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "RAMP": {
+      "date": "2026-11-04",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "ACA": {
+      "date": "2026-10-29",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "TALK": {
+      "date": "2026-10-29",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "BNY": {
+      "date": "2026-10-15",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    },
+    "GSBC": {
+      "date": "2026-10-14",
+      "confirmed_at": "2026-08-07T13:00:27.307145+00:00",
+      "provider": "YAHOO-SEED-v1.3"
+    }
+  }
+}
