@@ -176,9 +176,15 @@ def market_regime() -> dict:
 
 def analyze_symbol(ticker: str, raw: pd.DataFrame) -> Candidate | None:
     try:
-        df = add_indicators(raw).dropna()
-        if len(df) < 252:
-            return None
+       df = add_indicators(raw)
+
+if len(df) < 260:
+    return None
+
+df = df.dropna()
+
+if df.empty:
+    return None
         last = df.iloc[-1]
         close = float(last["Close"])
         cfg_u = CONFIG["universe"]
