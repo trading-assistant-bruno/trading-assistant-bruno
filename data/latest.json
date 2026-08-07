@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-07T10:00:49.458819+00:00",
+  "generated_at": "2026-08-07T10:14:28.864826+00:00",
   "regime": {
     "color": "VERT",
     "score": 90,
@@ -23,7 +23,7 @@
         "sma50_rising": false
       },
       "VIX": {
-        "close": 15.3,
+        "close": 15.28,
         "below_25": true
       }
     },
@@ -31,66 +31,24 @@
   },
   "candidates": [
     {
-      "ticker": "BSCT",
-      "close": 18.52,
-      "pivot": 18.54,
-      "entry": 18.56,
-      "stop": 18.0,
-      "stop_pct": 3.0,
-      "shares": 89,
-      "position_value": 1651.7,
-      "risk_eur": 49.55,
-      "score": 99.7,
-      "distance_52w_high_pct": 0.19,
-      "avg_dollar_volume": 10434714.0,
+      "ticker": "ROKU",
+      "close": 150.07,
+      "pivot": 148.88,
+      "entry": 149.03,
+      "stop": 140.96,
+      "stop_pct": 5.41,
+      "shares": 6,
+      "position_value": 894.17,
+      "risk_eur": 48.4,
+      "score": 98.2,
+      "distance_52w_high_pct": 0.36,
+      "avg_dollar_volume": 396054344.0,
       "reasons": [
         "Cours > MM50 > MM150 > MM200",
         "MM200 montante",
-        "\u00c0 0.2% du plus haut 52 semaines",
-        "Volatilit\u00e9 r\u00e9cente en contraction",
-        "Volume sup\u00e9rieur \u00e0 la moyenne"
-      ]
-    },
-    {
-      "ticker": "FPEI",
-      "close": 19.18,
-      "pivot": 19.22,
-      "entry": 19.24,
-      "stop": 18.67,
-      "stop_pct": 3.0,
-      "shares": 86,
-      "position_value": 1654.98,
-      "risk_eur": 49.65,
-      "score": 99.4,
-      "distance_52w_high_pct": 0.23,
-      "avg_dollar_volume": 5788663.0,
-      "reasons": [
-        "Cours > MM50 > MM150 > MM200",
-        "MM200 montante",
-        "\u00c0 0.2% du plus haut 52 semaines",
-        "Volatilit\u00e9 r\u00e9cente en contraction",
-        "Volume sup\u00e9rieur \u00e0 la moyenne"
-      ]
-    },
-    {
-      "ticker": "BKLN",
-      "close": 20.5,
-      "pivot": 20.41,
-      "entry": 20.43,
-      "stop": 19.82,
-      "stop_pct": 3.0,
-      "shares": 81,
-      "position_value": 1654.86,
-      "risk_eur": 49.65,
-      "score": 99.1,
-      "distance_52w_high_pct": 0.05,
-      "avg_dollar_volume": 122815098.0,
-      "reasons": [
-        "Cours > MM50 > MM150 > MM200",
-        "MM200 montante",
-        "\u00c0 0.0% du plus haut 52 semaines",
-        "Volatilit\u00e9 r\u00e9cente en contraction",
-        "Volume sup\u00e9rieur \u00e0 la moyenne"
+        "À 0.4% du plus haut 52 semaines",
+        "Volatilité récente en contraction",
+        "Volume supérieur à la moyenne"
       ]
     },
     {
@@ -109,9 +67,9 @@
       "reasons": [
         "Cours > MM50 > MM150 > MM200",
         "MM200 montante",
-        "\u00c0 1.1% du plus haut 52 semaines",
-        "Volatilit\u00e9 r\u00e9cente en contraction",
-        "Volume sup\u00e9rieur \u00e0 la moyenne"
+        "À 1.1% du plus haut 52 semaines",
+        "Volatilité récente en contraction",
+        "Volume supérieur à la moyenne"
       ]
     },
     {
@@ -130,9 +88,51 @@
       "reasons": [
         "Cours > MM50 > MM150 > MM200",
         "MM200 montante",
-        "\u00c0 2.1% du plus haut 52 semaines",
-        "Volatilit\u00e9 r\u00e9cente en contraction",
-        "Volume sup\u00e9rieur \u00e0 la moyenne"
+        "À 2.1% du plus haut 52 semaines",
+        "Volatilité récente en contraction",
+        "Volume supérieur à la moyenne"
+      ]
+    },
+    {
+      "ticker": "SAIC",
+      "close": 124.28,
+      "pivot": 123.01,
+      "entry": 123.13,
+      "stop": 113.28,
+      "stop_pct": 8.0,
+      "shares": 5,
+      "position_value": 615.66,
+      "risk_eur": 49.25,
+      "score": 97.3,
+      "distance_52w_high_pct": 1.07,
+      "avg_dollar_volume": 49703404.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "À 1.1% du plus haut 52 semaines",
+        "Volatilité récente en contraction",
+        "Volume supérieur à la moyenne"
+      ]
+    },
+    {
+      "ticker": "GHRS",
+      "close": 30.64,
+      "pivot": 31.0,
+      "entry": 31.03,
+      "stop": 28.55,
+      "stop_pct": 8.0,
+      "shares": 20,
+      "position_value": 620.62,
+      "risk_eur": 49.65,
+      "score": 97.0,
+      "distance_52w_high_pct": 1.16,
+      "avg_dollar_volume": 9094570.0,
+      "reasons": [
+        "Cours > MM50 > MM150 > MM200",
+        "MM200 montante",
+        "À 1.2% du plus haut 52 semaines",
+        "Volatilité récente en contraction",
+        "Volume supérieur à la moyenne"
       ]
     }
   ]
