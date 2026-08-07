@@ -161,10 +161,67 @@ def fetch_prices(symbols: list[str], period: str = "2y") -> dict[str, pd.DataFra
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
-    x.columns = [str(c).title() for c in x.columns]
-    required = {"Open", "High", "Low", "Close", "Volume"}
-    if not required.issubset(set(x.columns)):
-        raise ValueError("Missing OHLCV columns")
+
+    required = {
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+    }
+
+    # yfinance peut renvoyer des colonnes MultiIndex,
+    # notamment pour un seul ticker.
+    if isinstance(x.columns, pd.MultiIndex):
+
+        best_level = None
+        best_score = -1
+
+        for level in range(x.columns.nlevels):
+
+            values = [
+                str(value).title()
+                for value
+                in x.columns.get_level_values(level)
+            ]
+
+            score = sum(
+                value in required
+                for value in values
+            )
+
+            if score > best_score:
+                best_score = score
+                best_level = level
+
+        x.columns = [
+            str(value).title()
+            for value
+            in x.columns.get_level_values(best_level)
+        ]
+
+    else:
+
+        x.columns = [
+            str(column).title()
+            for column
+            in x.columns
+        ]
+
+    # Évite d'éventuelles colonnes dupliquées
+    x = x.loc[
+        :,
+        ~x.columns.duplicated()
+    ]
+
+    if not required.issubset(
+        set(x.columns)
+    ):
+        raise ValueError(
+            f"Missing OHLCV columns. "
+            f"Columns received: {list(x.columns)}"
+        )
+
     return x
 
 
