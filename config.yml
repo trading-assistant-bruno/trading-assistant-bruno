@@ -41,3 +41,8 @@ strategy:
 
   min_stop_distance_pct: 3
   max_stop_distance_pct: 8
+
+validation:
+  earnings_block_days: 7
+  min_chart_validation_score: 60
+  metadata_pause_seconds: 0.30

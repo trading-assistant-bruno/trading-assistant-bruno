@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 import math
 import os
@@ -13,6 +15,9 @@ import pandas as pd
 import requests
 import yaml
 import yfinance as yf
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from jinja2 import Template
 
 
@@ -63,6 +68,15 @@ class Candidate:
     contraction_steps: int
     base_quality_score: float
     reasons: list[str]
+
+    sector: str = "INCONNU"
+    industry: str = "INCONNU"
+    next_earnings_date: str | None = None
+    earnings_days: int | None = None
+    earnings_status: str = "INCONNU"
+    chart_validation_score: float = 0.0
+    final_decision: str = "À ANALYSER"
+    final_reason: str = ""
 
 
 def download_universe() -> list[str]:
@@ -1297,6 +1311,272 @@ def analyze_symbol(
         return None, "erreur"
 
 
+def _to_utc_timestamp(value) -> pd.Timestamp | None:
+    try:
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        return ts
+    except Exception:
+        return None
+
+
+def fetch_company_metadata(ticker: str) -> dict:
+    """Best-effort metadata. Never fails the workflow."""
+    result = {
+        "sector": "INCONNU",
+        "industry": "INCONNU",
+    }
+
+    try:
+        info = yf.Ticker(ticker).get_info()
+        if isinstance(info, dict):
+            result["sector"] = str(info.get("sector") or "INCONNU")
+            result["industry"] = str(info.get("industry") or "INCONNU")
+    except Exception as exc:
+        print(f"{ticker}: metadata unavailable: {exc}")
+
+    return result
+
+
+def fetch_next_earnings(ticker: str) -> dict:
+    """
+    Best-effort next earnings date from Yahoo/yfinance.
+    Unknown earnings are deliberately treated conservatively downstream.
+    """
+    now = pd.Timestamp.now(tz="UTC")
+    future_dates: list[pd.Timestamp] = []
+    tk = yf.Ticker(ticker)
+
+    # 1) Calendar endpoint
+    try:
+        calendar = tk.calendar
+
+        values = []
+        if isinstance(calendar, dict):
+            for key, value in calendar.items():
+                if "earning" in str(key).lower():
+                    if isinstance(value, (list, tuple)):
+                        values.extend(value)
+                    else:
+                        values.append(value)
+        elif isinstance(calendar, pd.DataFrame):
+            for label in list(calendar.index) + list(calendar.columns):
+                if "earning" in str(label).lower():
+                    try:
+                        if label in calendar.index:
+                            values.extend(calendar.loc[label].tolist())
+                        if label in calendar.columns:
+                            values.extend(calendar[label].tolist())
+                    except Exception:
+                        pass
+
+        for value in values:
+            ts = _to_utc_timestamp(value)
+            if ts is not None and ts >= now - pd.Timedelta(days=1):
+                future_dates.append(ts)
+
+    except Exception as exc:
+        print(f"{ticker}: calendar earnings unavailable: {exc}")
+
+    # 2) Earnings history/forecast endpoint fallback
+    try:
+        earnings_dates = tk.get_earnings_dates(limit=8)
+        if earnings_dates is not None and not earnings_dates.empty:
+            for value in earnings_dates.index:
+                ts = _to_utc_timestamp(value)
+                if ts is not None and ts >= now - pd.Timedelta(days=1):
+                    future_dates.append(ts)
+    except Exception as exc:
+        print(f"{ticker}: earnings dates fallback unavailable: {exc}")
+
+    if not future_dates:
+        return {
+            "next_earnings_date": None,
+            "earnings_days": None,
+            "earnings_status": "INCONNU",
+        }
+
+    next_date = min(future_dates)
+    days = int((next_date.normalize() - now.normalize()).days)
+
+    block_days = int(
+        CONFIG.get("validation", {}).get("earnings_block_days", 7)
+    )
+
+    if days <= block_days:
+        status = "PROCHE"
+    else:
+        status = "OK"
+
+    return {
+        "next_earnings_date": next_date.date().isoformat(),
+        "earnings_days": days,
+        "earnings_status": status,
+    }
+
+
+def compute_chart_validation_score(candidate: Candidate) -> float:
+    """
+    Quantitative chart validation. This is NOT image-AI vision.
+    It scores the geometry already extracted from price/volume history.
+    """
+    score = candidate.base_quality_score * 0.60
+
+    # Recent tightness: 15 pts
+    if candidate.base_tightness_pct <= 3:
+        score += 15
+    elif candidate.base_tightness_pct <= 5:
+        score += 11
+    elif candidate.base_tightness_pct <= 7:
+        score += 6
+
+    # Pivot proximity: 15 pts
+    distance = abs(candidate.extension_vs_pivot_pct)
+    if distance <= 0.7:
+        score += 15
+    elif distance <= 1.5:
+        score += 11
+    elif distance <= 3:
+        score += 5
+
+    # Stop efficiency: 10 pts
+    if candidate.stop_pct <= 4:
+        score += 10
+    elif candidate.stop_pct <= 6:
+        score += 7
+    elif candidate.stop_pct <= 8:
+        score += 3
+
+    return round(min(100, score), 1)
+
+
+def decide_final_action(candidate: Candidate) -> tuple[str, str]:
+    min_chart_score = float(
+        CONFIG.get("validation", {}).get("min_chart_validation_score", 60)
+    )
+
+    if candidate.status == "TROP ÉTENDU":
+        return "NE PAS ACHETER", "Cours déjà au-delà de la zone d'achat autorisée."
+
+    if candidate.earnings_status == "INCONNU":
+        return (
+            "VÉRIFIER RÉSULTATS",
+            "Date des résultats non confirmée automatiquement : achat non autorisé sans contrôle manuel.",
+        )
+
+    if candidate.earnings_status == "PROCHE":
+        return (
+            "BLOQUÉ RÉSULTATS",
+            f"Résultats prévus dans {candidate.earnings_days} jour(s), fenêtre de sécurité active.",
+        )
+
+    if candidate.chart_validation_score < min_chart_score:
+        return (
+            "REJETER STRUCTURE",
+            f"Validation graphique quantitative {candidate.chart_validation_score}/100 < {min_chart_score:.0f}/100.",
+        )
+
+    if candidate.status == "DANS ZONE D'ACHAT":
+        return (
+            "ACHAT CONDITIONNEL",
+            "Setup validé : ordre autorisé uniquement tant que le cours reste sous la borne haute de la zone d'achat.",
+        )
+
+    if candidate.status == "PRÊT À DÉCLENCHER":
+        return (
+            "PRÉPARER ORDRE",
+            "Setup validé mais cassure non encore confirmée : préparer un ordre conditionnel au déclenchement.",
+        )
+
+    if candidate.status == "ATTENDRE":
+        return (
+            "ATTENDRE",
+            "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre.",
+        )
+
+    return "NE RIEN FAIRE", "Aucune action requise."
+
+
+def _figure_to_data_uri(fig) -> str:
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def make_price_chart_uri(raw: pd.DataFrame, candidate: Candidate) -> str:
+    try:
+        df = add_indicators(raw).tail(140)
+        fig = plt.figure(figsize=(9, 4.8))
+        ax = fig.add_subplot(111)
+
+        ax.plot(df.index, df["Close"], label="Cours")
+        ax.plot(df.index, df["SMA21"], label="MM21")
+        ax.plot(df.index, df["SMA50"], label="MM50")
+        ax.plot(df.index, df["SMA150"], label="MM150")
+        ax.plot(df.index, df["SMA200"], label="MM200")
+        ax.axhline(candidate.pivot, linestyle="--", label="Pivot")
+        ax.axhline(candidate.buy_zone_max, linestyle=":", label="Zone achat max")
+        ax.axhline(candidate.stop, linestyle="--", label="Stop")
+        ax.set_title(f"{candidate.ticker} — Prix / moyennes / niveaux")
+        ax.set_ylabel("USD")
+        ax.grid(alpha=0.2)
+        ax.legend(fontsize=8, ncol=4)
+        fig.autofmt_xdate()
+
+        return _figure_to_data_uri(fig)
+    except Exception as exc:
+        print(f"{candidate.ticker}: price chart failed: {exc}")
+        return ""
+
+
+def make_volume_chart_uri(raw: pd.DataFrame, candidate: Candidate) -> str:
+    try:
+        df = normalize_ohlcv(raw).tail(90).copy()
+        df["Volume20"] = df["Volume"].rolling(20).mean()
+
+        fig = plt.figure(figsize=(9, 2.8))
+        ax = fig.add_subplot(111)
+        ax.bar(df.index, df["Volume"])
+        ax.plot(df.index, df["Volume20"], label="Volume moyen 20j")
+        ax.set_title(f"{candidate.ticker} — Volume")
+        ax.set_ylabel("Volume")
+        ax.grid(alpha=0.2)
+        ax.legend(fontsize=8)
+        fig.autofmt_xdate()
+
+        return _figure_to_data_uri(fig)
+    except Exception as exc:
+        print(f"{candidate.ticker}: volume chart failed: {exc}")
+        return ""
+
+
+def enrich_finalist(candidate: Candidate) -> Candidate:
+    metadata = fetch_company_metadata(candidate.ticker)
+    earnings = fetch_next_earnings(candidate.ticker)
+
+    candidate.sector = metadata["sector"]
+    candidate.industry = metadata["industry"]
+    candidate.next_earnings_date = earnings["next_earnings_date"]
+    candidate.earnings_days = earnings["earnings_days"]
+    candidate.earnings_status = earnings["earnings_status"]
+    candidate.chart_validation_score = compute_chart_validation_score(candidate)
+    candidate.final_decision, candidate.final_reason = decide_final_action(candidate)
+
+    pause = float(
+        CONFIG.get("validation", {}).get("metadata_pause_seconds", 0.3)
+    )
+    time.sleep(max(0, pause))
+
+    return candidate
+
+
 HTML_TEMPLATE = """
 <!doctype html>
 <html lang="fr">
@@ -1306,21 +1586,18 @@ HTML_TEMPLATE = """
 <title>Trading Assistant Bruno</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;margin:0;color:#18212f}
-main{max-width:900px;margin:auto;padding:18px}
+main{max-width:960px;margin:auto;padding:18px}
 .card{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 18px #00000012}
-h1{font-size:24px}.regime{font-size:28px;font-weight:800}
-.VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.metric{background:#f4f6f8;border-radius:10px;padding:10px}
-.ticker{font-size:22px;font-weight:800}.score{float:right}
-.status{font-size:18px;font-weight:800;margin-top:8px}
-small{color:#667085}ul{padding-left:20px}
-table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #eee}
+h1{font-size:24px}.regime{font-size:28px;font-weight:800}.VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metric{background:#f4f6f8;border-radius:10px;padding:10px}
+.ticker{font-size:22px;font-weight:800}.score{float:right}.status{font-size:17px;font-weight:700;margin-top:8px}.decision{font-size:21px;font-weight:900;margin:12px 0}
+small{color:#667085}ul{padding-left:20px}table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #eee}
+.chart{width:100%;border-radius:10px;margin-top:12px}.muted{color:#667085}
 @media(max-width:600px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
-<h1>Trading Assistant Bruno — v1.2</h1>
+<h1>Trading Assistant Bruno — v1.3</h1>
 
 <div class="card">
 <div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
@@ -1331,56 +1608,45 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
 
 <div class="card">
 <h2>Entonnoir du scan</h2>
-<table>
-{% for key, value in funnel.items() %}
-<tr><td>{{ key }}</td><td><b>{{ value }}</b></td></tr>
-{% endfor %}
-</table>
+<table>{% for key, value in funnel.items() %}<tr><td>{{ key }}</td><td><b>{{ value }}</b></td></tr>{% endfor %}</table>
 </div>
 
 {% if regime.color == "ROUGE" %}
 <div class="card"><h2>Aucun nouvel achat</h2><p>Le régime rouge bloque automatiquement les nouvelles positions.</p></div>
 {% endif %}
 
-{% if not candidates and regime.color != "ROUGE" %}
-<div class="card"><h2>Aucun finaliste</h2><p>Aucune action ne respecte aujourd'hui l'ensemble des critères de qualité v1.2.</p></div>
-{% endif %}
-
-{% for c in candidates %}
+{% for c in display_candidates %}
 <div class="card">
 <div class="ticker">{{ loop.index }}. {{ c.ticker }} <span class="score">{{ c.score }}/100</span></div>
-<div class="status">{{ c.status }}</div>
-<p>Cours : <b>{{ c.close }} $</b> — Pivot : <b>{{ c.pivot }} $</b> — RS Rank : <b>{{ c.rs_rank }}/99</b></p>
+<div class="status">Scanner : {{ c.status }}</div>
+<div class="decision">Décision : {{ c.final_decision }}</div>
+<p>{{ c.final_reason }}</p>
+<p><b>{{ c.sector }}</b> — {{ c.industry }}</p>
 
 <div class="grid">
+<div class="metric"><small>Cours / pivot</small><br><b>{{ c.close }} $ / {{ c.pivot }} $</b></div>
 <div class="metric"><small>Déclenchement</small><br><b>{{ c.entry_trigger }} $</b></div>
-<div class="metric"><small>Zone d'achat max</small><br><b>{{ c.buy_zone_max }} $</b></div>
-<div class="metric"><small>Stop technique</small><br><b>{{ c.stop }} $</b> ({{ c.stop_pct }}%)</div>
+<div class="metric"><small>Zone achat max</small><br><b>{{ c.buy_zone_max }} $</b></div>
+<div class="metric"><small>Stop</small><br><b>{{ c.stop }} $ ({{ c.stop_pct }}%)</b></div>
 <div class="metric"><small>Taille</small><br><b>{{ c.shares }} actions</b></div>
 <div class="metric"><small>Risque réel</small><br><b>{{ c.risk_eur }} €</b></div>
-<div class="metric"><small>Position</small><br><b>{{ c.position_value_usd }} $</b></div>
+<div class="metric"><small>RS Rank</small><br><b>{{ c.rs_rank }}/99</b></div>
 <div class="metric"><small>Qualité base</small><br><b>{{ c.base_quality_score }}/100</b></div>
-<div class="metric"><small>Profondeur base</small><br><b>{{ c.base_depth_pct }}%</b></div>
-<div class="metric"><small>Perf. 3 mois</small><br><b>{{ c.perf_3m_pct }}%</b></div>
-<div class="metric"><small>Perf. 6 mois</small><br><b>{{ c.perf_6m_pct }}%</b></div>
-<div class="metric"><small>Perf. 12 mois</small><br><b>{{ c.perf_12m_pct }}%</b></div>
-<div class="metric"><small>RS 6m vs SPY</small><br><b>{{ c.rs_6m_vs_spy_pct }}%</b></div>
+<div class="metric"><small>Validation graphique quantitative</small><br><b>{{ c.chart_validation_score }}/100</b></div>
+<div class="metric"><small>Prochains résultats</small><br><b>{{ c.next_earnings_date or 'INCONNU' }}</b> {% if c.earnings_days is not none %}({{ c.earnings_days }} j){% endif %}</div>
 </div>
+
+{% if c.price_chart_uri %}<img class="chart" src="{{ c.price_chart_uri }}" alt="Graphique prix {{ c.ticker }}">{% endif %}
+{% if c.volume_chart_uri %}<img class="chart" src="{{ c.volume_chart_uri }}" alt="Graphique volume {{ c.ticker }}">{% endif %}
 
 <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
 <p><a href="https://www.tradingview.com/chart/?symbol={{ c.ticker }}" target="_blank">Ouvrir dans TradingView</a></p>
 </div>
 {% endfor %}
 
-<div class="card">
-<small>
-RS Rank = percentile de momentum interne à l'univers, pas l'IBD RS Rating.
-Le score est un classement technique, pas une probabilité de gain.
-La v1.2 n'intègre pas encore le calendrier des résultats, le secteur, ni la validation graphique visuelle avancée.
-Aucun ordre n'est envoyé au broker.
-</small>
-</div>
-
+<div class="card"><small>
+La validation graphique v1.3 est quantitative (prix/volume), pas une IA visuelle. Si la date de résultats est inconnue, l'achat reste bloqué jusqu'à contrôle manuel. Le secteur est informatif dans cette version. Aucun ordre n'est envoyé au broker.
+</small></div>
 </main></body></html>
 """
 
@@ -1398,7 +1664,7 @@ def send_telegram(
         return
 
     lines = [
-        "📈 Trading Assistant v1.2",
+        "📈 Trading Assistant v1.3",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         f"Nouvelles positions autorisées : {regime['new_positions_allowed']}",
         "",
@@ -1411,11 +1677,11 @@ def send_telegram(
     else:
         for i, c in enumerate(candidates, 1):
             lines += [
-                f"{i}. {c.ticker} — {c.status} — {c.score}/100",
-                f"RS Rank {c.rs_rank}/99 | Base {c.base_quality_score}/100",
-                f"Cours {c.close}$ | Pivot {c.pivot}$",
-                f"Déclenchement {c.entry_trigger}$ | Zone max {c.buy_zone_max}$",
-                f"Stop {c.stop}$ | {c.shares} actions | risque {c.risk_eur}€",
+                f"{i}. {c.ticker} — {c.final_decision}",
+                f"Scanner {c.status} | Score {c.score}/100 | Graph {c.chart_validation_score}/100",
+                f"Entrée {c.entry_trigger}$ | Max {c.buy_zone_max}$ | Stop {c.stop}$",
+                f"{c.shares} actions | risque {c.risk_eur}€",
+                f"Résultats : {c.next_earnings_date or 'INCONNU'}",
                 "",
             ]
 
@@ -1428,9 +1694,8 @@ def send_telegram(
     except Exception as exc:
         print(f"Telegram error: {exc}")
 
-
 def main() -> None:
-    print("Starting Trading Assistant v1.2")
+    print("Starting Trading Assistant v1.3")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -1544,9 +1809,31 @@ def main() -> None:
     candidates = all_candidates[:max_new]
     funnel["Affichés"] = len(candidates)
 
+    # Validation finale uniquement sur les quelques titres affichés.
+    enriched_candidates: list[Candidate] = []
+    display_candidates: list[dict] = []
+
+    for candidate in candidates:
+        candidate = enrich_finalist(candidate)
+        enriched_candidates.append(candidate)
+
+        display = asdict(candidate)
+        frame = frames.get(candidate.ticker)
+
+        if frame is not None:
+            display["price_chart_uri"] = make_price_chart_uri(frame, candidate)
+            display["volume_chart_uri"] = make_volume_chart_uri(frame, candidate)
+        else:
+            display["price_chart_uri"] = ""
+            display["volume_chart_uri"] = ""
+
+        display_candidates.append(display)
+
+    candidates = enriched_candidates
+
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "version": "1.2",
+        "version": "1.3",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
@@ -1576,6 +1863,7 @@ def main() -> None:
         eurusd=round(eurusd, 4),
         funnel=funnel,
         candidates=candidates,
+        display_candidates=display_candidates,
         generated_at=datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
     )
 
