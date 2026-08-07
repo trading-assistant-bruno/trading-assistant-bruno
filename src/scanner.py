@@ -78,6 +78,10 @@ class Candidate:
     earnings_days: int | None = None
     earnings_status: str = "INCONNU"
     earnings_source: str = "INCONNU"
+    corporate_event_status: str = "CLEAR"
+    corporate_event_type: str = "AUCUN"
+    corporate_event_reason: str = ""
+    corporate_event_source: str = "AUCUNE"
     chart_validation_score: float = 0.0
     final_decision: str = "À ANALYSER"
     final_reason: str = ""
@@ -1334,6 +1338,7 @@ def fetch_company_metadata(ticker: str) -> dict:
     result = {
         "sector": "INCONNU",
         "industry": "INCONNU",
+        "company_name": ticker,
     }
 
     try:
@@ -1341,11 +1346,249 @@ def fetch_company_metadata(ticker: str) -> dict:
         if isinstance(info, dict):
             result["sector"] = str(info.get("sector") or "INCONNU")
             result["industry"] = str(info.get("industry") or "INCONNU")
+            result["company_name"] = str(
+                info.get("longName")
+                or info.get("shortName")
+                or ticker
+            )
     except Exception as exc:
         print(f"{ticker}: metadata unavailable: {exc}")
 
     return result
 
+
+
+def _manual_corporate_event(ticker: str) -> dict | None:
+    corporate_cfg = CONFIG.get("corporate_events", {})
+    manual = corporate_cfg.get("manual_exclude_tickers", {}) or {}
+
+    value = manual.get(ticker.upper())
+
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        reason = str(
+            value.get("reason")
+            or "Titre exclu manuellement pour événement corporate."
+        )
+        event_type = str(
+            value.get("type")
+            or "M&A / ACQUISITION"
+        )
+    else:
+        reason = str(value)
+        event_type = "M&A / ACQUISITION"
+
+    return {
+        "corporate_event_status": "EXCLUDE",
+        "corporate_event_type": event_type,
+        "corporate_event_reason": reason,
+        "corporate_event_source": "LISTE MANUELLE",
+    }
+
+
+def _extract_news_items(ticker: str) -> list[dict]:
+    """Normalise différentes structures renvoyées par yfinance."""
+    tk = yf.Ticker(ticker)
+    raw_items = []
+
+    try:
+        if hasattr(tk, "get_news"):
+            raw_items = tk.get_news(count=30) or []
+    except Exception as exc:
+        print(f"{ticker}: get_news unavailable: {exc}")
+
+    if not raw_items:
+        try:
+            raw_items = tk.news or []
+        except Exception as exc:
+            print(f"{ticker}: news unavailable: {exc}")
+            raw_items = []
+
+    items = []
+
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+
+        content = raw.get("content")
+        if not isinstance(content, dict):
+            content = {}
+
+        title = (
+            raw.get("title")
+            or content.get("title")
+            or ""
+        )
+
+        summary = (
+            raw.get("summary")
+            or content.get("summary")
+            or content.get("description")
+            or ""
+        )
+
+        published = (
+            raw.get("providerPublishTime")
+            or raw.get("pubDate")
+            or content.get("pubDate")
+            or content.get("providerPublishTime")
+        )
+
+        items.append(
+            {
+                "title": str(title),
+                "summary": str(summary),
+                "published": published,
+            }
+        )
+
+    return items
+
+
+def _news_is_recent(value, lookback_days: int) -> bool:
+    if value in (None, ""):
+        # Une news sans date n'est pas assez fiable pour exclure
+        # automatiquement, mais peut servir à REVIEW plus bas.
+        return False
+
+    try:
+        if isinstance(value, (int, float)):
+            ts = pd.Timestamp(value, unit="s", tz="UTC")
+        else:
+            ts = pd.Timestamp(value)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            else:
+                ts = ts.tz_convert("UTC")
+
+        now = pd.Timestamp.now(tz="UTC")
+        return ts >= now - pd.Timedelta(days=lookback_days)
+
+    except Exception:
+        return False
+
+
+def detect_corporate_event(
+    ticker: str,
+    company_name: str,
+) -> dict:
+    """
+    Filtre conservateur des événements qui rendent le graphique peu
+    représentatif d'un setup momentum classique.
+
+    EXCLUDE :
+    - liste manuelle vérifiée ;
+    - formulation très explicite indiquant que la société est la cible
+      d'un rachat / take-private.
+
+    REVIEW :
+    - news récente comportant un vocabulaire M&A ambigu.
+      REVIEW bloque aussi l'ordre, mais demande vérification.
+    """
+    corporate_cfg = CONFIG.get("corporate_events", {})
+
+    if not bool(corporate_cfg.get("enabled", True)):
+        return {
+            "corporate_event_status": "CLEAR",
+            "corporate_event_type": "AUCUN",
+            "corporate_event_reason": "",
+            "corporate_event_source": "DÉSACTIVÉ",
+        }
+
+    manual = _manual_corporate_event(ticker)
+    if manual is not None:
+        return manual
+
+    lookback_days = int(
+        corporate_cfg.get("news_lookback_days", 180)
+    )
+
+    strong_target_patterns = [
+        r"\bto be acquired by\b",
+        r"\bagrees to be acquired\b",
+        r"\bagreed to be acquired\b",
+        r"\bwill be acquired by\b",
+        r"\bbeing acquired by\b",
+        r"\btake[- ]private\b",
+        r"\bgo private\b",
+        r"\bbuyout offer\b",
+        r"\btender offer for\b",
+        r"\bshareholders approve\b.*\bacquisition\b",
+        r"\bshareholders approve\b.*\bmerger\b",
+        r"\bmerger agreement\b.*\bto be acquired\b",
+    ]
+
+    generic_patterns = [
+        r"\bdefinitive agreement\b",
+        r"\bacquisition\b",
+        r"\bmerger\b",
+        r"\bbuyout\b",
+        r"\btender offer\b",
+        r"\btakeover\b",
+        r"\bstrategic alternatives\b",
+    ]
+
+    recent_generic_hits = []
+
+    try:
+        news_items = _extract_news_items(ticker)
+
+        for item in news_items:
+            title = item["title"].strip()
+            summary = item["summary"].strip()
+            corpus = f"{title} {summary}".lower()
+
+            is_recent = _news_is_recent(
+                item.get("published"),
+                lookback_days,
+            )
+
+            # EXCLUDE automatique uniquement avec signal très explicite
+            # ET news datée récemment.
+            if is_recent and any(
+                re.search(pattern, corpus, flags=re.IGNORECASE)
+                for pattern in strong_target_patterns
+            ):
+                return {
+                    "corporate_event_status": "EXCLUDE",
+                    "corporate_event_type": "M&A / ACQUISITION",
+                    "corporate_event_reason": (
+                        "Actualité récente indiquant explicitement que "
+                        "la société est cible d'une opération de rachat/fusion : "
+                        + title[:180]
+                    ),
+                    "corporate_event_source": "YAHOO NEWS",
+                }
+
+            if is_recent and any(
+                re.search(pattern, corpus, flags=re.IGNORECASE)
+                for pattern in generic_patterns
+            ):
+                recent_generic_hits.append(title)
+
+    except Exception as exc:
+        print(f"{ticker}: corporate event detection unavailable: {exc}")
+
+    if recent_generic_hits:
+        return {
+            "corporate_event_status": "REVIEW",
+            "corporate_event_type": "M&A / CORPORATE EVENT",
+            "corporate_event_reason": (
+                "Actualité M&A récente détectée mais rôle de la société "
+                "non déterminé automatiquement : "
+                + recent_generic_hits[0][:180]
+            ),
+            "corporate_event_source": "YAHOO NEWS",
+        }
+
+    return {
+        "corporate_event_status": "CLEAR",
+        "corporate_event_type": "AUCUN",
+        "corporate_event_reason": "",
+        "corporate_event_source": "YAHOO NEWS / AUCUN SIGNAL",
+    }
 
 def _earnings_result(
     next_date: pd.Timestamp,
@@ -1944,6 +2187,20 @@ def decide_final_action(candidate: Candidate) -> tuple[str, str]:
             "Cours déjà au-delà de la zone d'achat autorisée.",
         )
 
+    if candidate.corporate_event_status == "EXCLUDE":
+        return (
+            "EXCLU — ÉVÉNEMENT CORPORATE",
+            candidate.corporate_event_reason
+            or "Événement corporate incompatible avec le setup.",
+        )
+
+    if candidate.corporate_event_status == "REVIEW":
+        return (
+            "VÉRIFIER ÉVÉNEMENT CORPORATE",
+            candidate.corporate_event_reason
+            or "Actualité corporate à contrôler avant tout ordre.",
+        )
+
     # La structure doit être suffisamment bonne AVANT de regarder
     # l'autorisation liée aux résultats.
     if candidate.base_quality_score < min_base_score:
@@ -2070,14 +2327,25 @@ def make_volume_chart_uri(raw: pd.DataFrame, candidate: Candidate) -> str:
 
 def enrich_finalist(candidate: Candidate) -> Candidate:
     metadata = fetch_company_metadata(candidate.ticker)
+    corporate = detect_corporate_event(
+        candidate.ticker,
+        metadata.get("company_name", candidate.ticker),
+    )
     earnings = fetch_next_earnings(candidate.ticker)
 
     candidate.sector = metadata["sector"]
     candidate.industry = metadata["industry"]
+
+    candidate.corporate_event_status = corporate["corporate_event_status"]
+    candidate.corporate_event_type = corporate["corporate_event_type"]
+    candidate.corporate_event_reason = corporate["corporate_event_reason"]
+    candidate.corporate_event_source = corporate["corporate_event_source"]
+
     candidate.next_earnings_date = earnings["next_earnings_date"]
     candidate.earnings_days = earnings["earnings_days"]
     candidate.earnings_status = earnings["earnings_status"]
     candidate.earnings_source = earnings["earnings_source"]
+
     candidate.chart_validation_score = compute_chart_validation_score(candidate)
     candidate.final_decision, candidate.final_reason = decide_final_action(candidate)
 
@@ -2178,7 +2446,7 @@ a{color:var(--blue);font-weight:700}
 <body>
 <main>
 
-<h1>Trading Assistant — v1.3.3</h1>
+<h1>Trading Assistant — v1.3.4</h1>
 
 <div id="freshness" class="fresh">Vérification de la fraîcheur des données…</div>
 
@@ -2274,6 +2542,9 @@ a{color:var(--blue);font-weight:700}
         <span class="badge">Base {{ c.base_quality_score }}/100</span>
         <span class="badge">Validation {{ c.chart_validation_score }}/100</span>
         <span class="badge">RS {{ c.rs_rank }}/99</span>
+        {% if c.corporate_event_status != 'CLEAR' %}
+        <span class="badge">Corporate {{ c.corporate_event_status }}</span>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
@@ -2295,7 +2566,13 @@ a{color:var(--blue);font-weight:700}
         <div class="metric"><small>Validation graphique</small><b>{{ c.chart_validation_score }}/100</b></div>
         <div class="metric"><small>Résultats</small><b>{{ c.next_earnings_date or 'INCONNU' }} · {{ c.earnings_source }}</b></div>
         <div class="metric"><small>RS Rank</small><b>{{ c.rs_rank }}/99</b></div>
+        <div class="metric"><small>Corporate</small><b>{{ c.corporate_event_status }}</b></div>
+        <div class="metric"><small>Type événement</small><b>{{ c.corporate_event_type }}</b></div>
       </div>
+
+      {% if c.corporate_event_status != 'CLEAR' %}
+      <p><b>Événement corporate :</b> {{ c.corporate_event_reason }} ({{ c.corporate_event_source }})</p>
+      {% endif %}
 
       {% if c.price_chart_uri %}<img class="chart" src="{{ c.price_chart_uri }}" alt="Graphique prix {{ c.ticker }}">{% endif %}
       {% if c.volume_chart_uri %}<img class="chart" src="{{ c.volume_chart_uri }}" alt="Graphique volume {{ c.ticker }}">{% endif %}
@@ -2417,7 +2694,7 @@ def send_telegram(
     ]
 
     lines = [
-        "📈 Trading Assistant v1.3.3",
+        "📈 Trading Assistant v1.3.4",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         "",
     ]
@@ -2454,7 +2731,7 @@ def send_telegram(
         print(f"Telegram error: {exc}")
 
 def main() -> None:
-    print("Starting Trading Assistant v1.3.3")
+    print("Starting Trading Assistant v1.3.4")
 
     # Garantit l’existence du cache persistant pour le commit GitHub.
     _save_earnings_cache(_load_earnings_cache())
@@ -2624,7 +2901,7 @@ def main() -> None:
 
     payload = {
         "generated_at": generated_at_iso,
-        "version": "1.3.3",
+        "version": "1.3.4",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
