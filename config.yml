@@ -44,5 +44,7 @@ strategy:
 
 validation:
   earnings_block_days: 7
-  min_chart_validation_score: 60
+  min_chart_validation_score: 75
+  min_final_base_quality_score: 70
+  max_data_age_hours: 18
   metadata_pause_seconds: 0.30

@@ -1456,47 +1456,86 @@ def compute_chart_validation_score(candidate: Candidate) -> float:
 
 
 def decide_final_action(candidate: Candidate) -> tuple[str, str]:
+    validation_cfg = CONFIG.get("validation", {})
+
     min_chart_score = float(
-        CONFIG.get("validation", {}).get("min_chart_validation_score", 60)
+        validation_cfg.get("min_chart_validation_score", 75)
+    )
+
+    min_base_score = float(
+        validation_cfg.get("min_final_base_quality_score", 70)
     )
 
     if candidate.status == "TROP ÉTENDU":
-        return "NE PAS ACHETER", "Cours déjà au-delà de la zone d'achat autorisée."
+        return (
+            "NE PAS ACHETER",
+            "Cours déjà au-delà de la zone d'achat autorisée.",
+        )
+
+    # La structure doit être suffisamment bonne AVANT de regarder
+    # l'autorisation liée aux résultats.
+    if candidate.base_quality_score < min_base_score:
+        return (
+            "PAS D'ORDRE — STRUCTURE",
+            (
+                f"Qualité de base {candidate.base_quality_score}/100 "
+                f"< {min_base_score:.0f}/100."
+            ),
+        )
+
+    if candidate.chart_validation_score < min_chart_score:
+        return (
+            "PAS D'ORDRE — VALIDATION",
+            (
+                f"Validation graphique quantitative "
+                f"{candidate.chart_validation_score}/100 "
+                f"< {min_chart_score:.0f}/100."
+            ),
+        )
 
     if candidate.earnings_status == "INCONNU":
         return (
             "VÉRIFIER RÉSULTATS",
-            "Date des résultats non confirmée automatiquement : achat non autorisé sans contrôle manuel.",
+            (
+                "Date des résultats non confirmée automatiquement : "
+                "aucun ordre tant qu'elle n'est pas vérifiée."
+            ),
         )
 
     if candidate.earnings_status == "PROCHE":
         return (
             "BLOQUÉ RÉSULTATS",
-            f"Résultats prévus dans {candidate.earnings_days} jour(s), fenêtre de sécurité active.",
-        )
-
-    if candidate.chart_validation_score < min_chart_score:
-        return (
-            "REJETER STRUCTURE",
-            f"Validation graphique quantitative {candidate.chart_validation_score}/100 < {min_chart_score:.0f}/100.",
+            (
+                f"Résultats prévus dans {candidate.earnings_days} jour(s) : "
+                "fenêtre de sécurité active."
+            ),
         )
 
     if candidate.status == "DANS ZONE D'ACHAT":
         return (
             "ACHAT CONDITIONNEL",
-            "Setup validé : ordre autorisé uniquement tant que le cours reste sous la borne haute de la zone d'achat.",
+            (
+                "Setup validé. Ordre autorisé uniquement si le cours reste "
+                "dans la zone d'achat et sous sa borne maximale."
+            ),
         )
 
     if candidate.status == "PRÊT À DÉCLENCHER":
         return (
             "PRÉPARER ORDRE",
-            "Setup validé mais cassure non encore confirmée : préparer un ordre conditionnel au déclenchement.",
+            (
+                "Setup validé. Préparer un ordre conditionnel au niveau "
+                "de déclenchement, sans anticiper la cassure."
+            ),
         )
 
     if candidate.status == "ATTENDRE":
         return (
             "ATTENDRE",
-            "Setup intéressant mais encore trop éloigné du pivot pour déclencher un ordre.",
+            (
+                "Setup de qualité mais pas encore dans la fenêtre de "
+                "déclenchement."
+            ),
         )
 
     return "NE RIEN FAIRE", "Aucune action requise."
@@ -1582,72 +1621,301 @@ HTML_TEMPLATE = """
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Trading Assistant Bruno</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f5f7fa">
+<title>Trading Assistant</title>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;margin:0;color:#18212f}
-main{max-width:960px;margin:auto;padding:18px}
-.card{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 18px #00000012}
-h1{font-size:24px}.regime{font-size:28px;font-weight:800}.VERT{color:#138a42}.ORANGE{color:#c46b00}.ROUGE{color:#c62828}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metric{background:#f4f6f8;border-radius:10px;padding:10px}
-.ticker{font-size:22px;font-weight:800}.score{float:right}.status{font-size:17px;font-weight:700;margin-top:8px}.decision{font-size:21px;font-weight:900;margin:12px 0}
-small{color:#667085}ul{padding-left:20px}table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #eee}
-.chart{width:100%;border-radius:10px;margin-top:12px}.muted{color:#667085}
-@media(max-width:600px){.grid{grid-template-columns:1fr}}
+:root{
+  --bg:#f5f7fa;--card:#fff;--text:#18212f;--muted:#667085;
+  --green:#138a42;--orange:#c46b00;--red:#c62828;--blue:#155eef;
+  --line:#e6e9ee;--soft:#f4f6f8;
+}
+*{box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg);margin:0;color:var(--text);
+}
+main{max-width:900px;margin:auto;padding:18px 16px 40px}
+h1{font-size:25px;margin:10px 0 16px}
+h2{font-size:22px;margin:0 0 12px}
+h3{font-size:19px;margin:0 0 8px}
+.card{
+  background:var(--card);border-radius:20px;padding:18px;margin:14px 0;
+  box-shadow:0 3px 18px #00000010;
+}
+.regime{font-size:29px;font-weight:900}
+.VERT{color:var(--green)}.ORANGE{color:var(--orange)}.ROUGE{color:var(--red)}
+.muted,small{color:var(--muted)}
+.fresh{
+  border-radius:14px;padding:11px 13px;font-weight:800;margin:0 0 14px;
+  background:#eaf8ef;color:#087a34;
+}
+.fresh.stale{background:#fff1f0;color:#b42318}
+.hero{border:2px solid #e7ebf0}
+.action-count{font-size:31px;font-weight:900;line-height:1.05;margin:6px 0 10px}
+.action-none{color:var(--green)}
+.action-warning{color:var(--orange)}
+.actionable{border-left:6px solid var(--green)}
+.prepare{border-left:6px solid var(--blue)}
+.waiting{border-left:6px solid #98a2b3}
+.blocked{border-left:6px solid var(--orange)}
+.rejected{border-left:6px solid var(--red)}
+.ticker{font-size:25px;font-weight:900}
+.decision{font-size:21px;font-weight:900;margin:8px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.metric{background:var(--soft);border-radius:13px;padding:12px}
+.metric small{display:block;margin-bottom:4px}
+.metric b{font-size:18px}
+.key-order{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:12px 0;
+}
+.key-order .metric{background:#f7f8fa}
+.badges{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
+.badge{
+  background:var(--soft);border-radius:999px;padding:7px 10px;
+  font-size:13px;font-weight:800;
+}
+details{
+  background:var(--card);border-radius:16px;margin:14px 0;
+  box-shadow:0 3px 18px #0000000b;
+}
+summary{
+  cursor:pointer;padding:16px 18px;font-weight:800;list-style:none;
+}
+summary::-webkit-details-marker{display:none}
+.details-body{padding:0 18px 18px}
+table{width:100%;border-collapse:collapse}
+td{padding:7px 4px;border-bottom:1px solid var(--line)}
+td:last-child{text-align:right;font-weight:800}
+.chart{width:100%;border-radius:10px;margin-top:12px}
+ul{padding-left:20px}
+a{color:var(--blue);font-weight:700}
+.section-label{
+  text-transform:uppercase;letter-spacing:.06em;font-size:12px;
+  color:var(--muted);font-weight:900;margin:22px 2px 6px;
+}
+@media(max-width:600px){
+  .grid,.key-order{grid-template-columns:1fr 1fr}
+  main{padding:12px 12px 34px}
+  .card{padding:17px}
+  .regime{font-size:27px}
+}
 </style>
 </head>
-<body><main>
-<h1>Trading Assistant Bruno — v1.3</h1>
+<body>
+<main>
+
+<h1>Trading Assistant — v1.3.1</h1>
+
+<div id="freshness" class="fresh">Vérification de la fraîcheur des données…</div>
 
 <div class="card">
-<div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
-<p>Score régime : {{ regime.score }}/100 — nouvelles positions autorisées : {{ regime.new_positions_allowed }}</p>
-<p>EUR/USD : {{ eurusd }}</p>
-<small>Calculé le {{ generated_at }}</small>
+  <div class="regime {{ regime.color }}">● Marché {{ regime.color }}</div>
+  <p><b>{{ regime.score }}/100</b> — positions nouvelles autorisées par le régime : <b>{{ regime.new_positions_allowed }}</b></p>
+  <small>Scan : {{ generated_at }} · EUR/USD {{ eurusd }}</small>
 </div>
 
-<div class="card">
-<h2>Entonnoir du scan</h2>
-<table>{% for key, value in funnel.items() %}<tr><td>{{ key }}</td><td><b>{{ value }}</b></td></tr>{% endfor %}</table>
+<div class="card hero">
+  <div class="section-label">Que faire aujourd'hui ?</div>
+
+  {% if regime.color == "ROUGE" %}
+    <div class="action-count action-warning">Aucun nouvel ordre</div>
+    <p>Le régime rouge bloque les nouvelles positions.</p>
+
+  {% elif actionable_candidates|length == 0 %}
+    <div class="action-count action-none">Aucun ordre validé</div>
+    <p>Le scanner ne valide actuellement aucun achat. Tu n'as rien à saisir dans le broker.</p>
+
+  {% else %}
+    <div class="action-count">{{ actionable_candidates|length }} ordre(s) à traiter</div>
+    <p>Seuls les titres ci-dessous ont franchi toutes les barrières de validation.</p>
+  {% endif %}
+
+  {% if next_watch|length > 0 %}
+    <p class="muted">
+      À surveiller ensuite :
+      {% for c in next_watch %}
+        <b>{{ c.ticker }}</b>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
 </div>
 
-{% if regime.color == "ROUGE" %}
-<div class="card"><h2>Aucun nouvel achat</h2><p>Le régime rouge bloque automatiquement les nouvelles positions.</p></div>
-{% endif %}
+{% if actionable_candidates|length > 0 %}
+<div class="section-label">Actions à exécuter / préparer</div>
 
-{% for c in display_candidates %}
-<div class="card">
-<div class="ticker">{{ loop.index }}. {{ c.ticker }} <span class="score">{{ c.score }}/100</span></div>
-<div class="status">Scanner : {{ c.status }}</div>
-<div class="decision">Décision : {{ c.final_decision }}</div>
-<p>{{ c.final_reason }}</p>
-<p><b>{{ c.sector }}</b> — {{ c.industry }}</p>
+{% for c in actionable_candidates %}
+<div class="card {% if c.final_decision == 'ACHAT CONDITIONNEL' %}actionable{% else %}prepare{% endif %}">
+  <div class="ticker">{{ c.ticker }}</div>
+  <div class="decision">{{ c.final_decision }}</div>
+  <p>{{ c.final_reason }}</p>
 
-<div class="grid">
-<div class="metric"><small>Cours / pivot</small><br><b>{{ c.close }} $ / {{ c.pivot }} $</b></div>
-<div class="metric"><small>Déclenchement</small><br><b>{{ c.entry_trigger }} $</b></div>
-<div class="metric"><small>Zone achat max</small><br><b>{{ c.buy_zone_max }} $</b></div>
-<div class="metric"><small>Stop</small><br><b>{{ c.stop }} $ ({{ c.stop_pct }}%)</b></div>
-<div class="metric"><small>Taille</small><br><b>{{ c.shares }} actions</b></div>
-<div class="metric"><small>Risque réel</small><br><b>{{ c.risk_eur }} €</b></div>
-<div class="metric"><small>RS Rank</small><br><b>{{ c.rs_rank }}/99</b></div>
-<div class="metric"><small>Qualité base</small><br><b>{{ c.base_quality_score }}/100</b></div>
-<div class="metric"><small>Validation graphique quantitative</small><br><b>{{ c.chart_validation_score }}/100</b></div>
-<div class="metric"><small>Prochains résultats</small><br><b>{{ c.next_earnings_date or 'INCONNU' }}</b> {% if c.earnings_days is not none %}({{ c.earnings_days }} j){% endif %}</div>
-</div>
+  <div class="key-order">
+    <div class="metric"><small>Entrée / déclenchement</small><b>{{ c.entry_trigger }} $</b></div>
+    <div class="metric"><small>Ne pas payer au-dessus de</small><b>{{ c.buy_zone_max }} $</b></div>
+    <div class="metric"><small>Stop</small><b>{{ c.stop }} $</b></div>
+    <div class="metric"><small>Quantité</small><b>{{ c.shares }} actions</b></div>
+    <div class="metric"><small>Risque</small><b>{{ c.risk_eur }} €</b></div>
+    <div class="metric"><small>Cours du scan</small><b>{{ c.close }} $</b></div>
+  </div>
 
-{% if c.price_chart_uri %}<img class="chart" src="{{ c.price_chart_uri }}" alt="Graphique prix {{ c.ticker }}">{% endif %}
-{% if c.volume_chart_uri %}<img class="chart" src="{{ c.volume_chart_uri }}" alt="Graphique volume {{ c.ticker }}">{% endif %}
-
-<ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-<p><a href="https://www.tradingview.com/chart/?symbol={{ c.ticker }}" target="_blank">Ouvrir dans TradingView</a></p>
+  <div class="badges">
+    <span class="badge">Base {{ c.base_quality_score }}/100</span>
+    <span class="badge">Validation {{ c.chart_validation_score }}/100</span>
+    <span class="badge">RS {{ c.rs_rank }}/99</span>
+    <span class="badge">Résultats {{ c.next_earnings_date or 'INCONNUS' }}</span>
+  </div>
 </div>
 {% endfor %}
+{% endif %}
 
-<div class="card"><small>
-La validation graphique v1.3 est quantitative (prix/volume), pas une IA visuelle. Si la date de résultats est inconnue, l'achat reste bloqué jusqu'à contrôle manuel. Le secteur est informatif dans cette version. Aucun ordre n'est envoyé au broker.
-</small></div>
-</main></body></html>
+{% if watch_candidates|length > 0 %}
+<div class="section-label">Surveillance</div>
+{% for c in watch_candidates %}
+<div class="card {% if 'RÉSULTATS' in c.final_decision %}blocked{% else %}waiting{% endif %}">
+  <div class="ticker">{{ c.ticker }}</div>
+  <div class="decision">{{ c.final_decision }}</div>
+  <p>{{ c.final_reason }}</p>
+  <div class="grid">
+    <div class="metric"><small>Cours / pivot</small><b>{{ c.close }} $ / {{ c.pivot }} $</b></div>
+    <div class="metric"><small>Déclenchement</small><b>{{ c.entry_trigger }} $</b></div>
+    <div class="metric"><small>Base / validation</small><b>{{ c.base_quality_score }} / {{ c.chart_validation_score }}</b></div>
+    <div class="metric"><small>RS Rank</small><b>{{ c.rs_rank }}/99</b></div>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if rejected_candidates|length > 0 %}
+<details>
+  <summary>Configurations non autorisées ({{ rejected_candidates|length }})</summary>
+  <div class="details-body">
+    {% for c in rejected_candidates %}
+    <div class="card rejected">
+      <div class="ticker">{{ c.ticker }}</div>
+      <div class="decision">{{ c.final_decision }}</div>
+      <p>{{ c.final_reason }}</p>
+      <div class="badges">
+        <span class="badge">Base {{ c.base_quality_score }}/100</span>
+        <span class="badge">Validation {{ c.chart_validation_score }}/100</span>
+        <span class="badge">RS {{ c.rs_rank }}/99</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<details>
+  <summary>Détails techniques et graphiques</summary>
+  <div class="details-body">
+    {% for c in display_candidates %}
+    <div class="card">
+      <div class="ticker">{{ c.ticker }}</div>
+      <p><b>{{ c.sector }}</b> — {{ c.industry }}</p>
+      <div class="grid">
+        <div class="metric"><small>Pivot</small><b>{{ c.pivot }} $</b></div>
+        <div class="metric"><small>Stop</small><b>{{ c.stop }} $ ({{ c.stop_pct }}%)</b></div>
+        <div class="metric"><small>Qualité base</small><b>{{ c.base_quality_score }}/100</b></div>
+        <div class="metric"><small>Validation graphique</small><b>{{ c.chart_validation_score }}/100</b></div>
+        <div class="metric"><small>Résultats</small><b>{{ c.next_earnings_date or 'INCONNU' }}</b></div>
+        <div class="metric"><small>RS Rank</small><b>{{ c.rs_rank }}/99</b></div>
+      </div>
+
+      {% if c.price_chart_uri %}<img class="chart" src="{{ c.price_chart_uri }}" alt="Graphique prix {{ c.ticker }}">{% endif %}
+      {% if c.volume_chart_uri %}<img class="chart" src="{{ c.volume_chart_uri }}" alt="Graphique volume {{ c.ticker }}">{% endif %}
+
+      <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+      <p><a href="https://www.tradingview.com/chart/?symbol={{ c.ticker }}" target="_blank">Ouvrir dans TradingView</a></p>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+
+<details>
+  <summary>Entonnoir du scan</summary>
+  <div class="details-body">
+    <table>
+      {% for key, value in funnel.items() %}
+      <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</details>
+
+<div class="card">
+  <small>
+    Les décisions sont des sorties mécaniques de la stratégie, pas des garanties de performance.
+    Le score n'est pas une probabilité de gain. Aucun ordre n'est envoyé automatiquement au broker.
+  </small>
+</div>
+
+<script>
+(function(){
+  const generated = new Date("{{ generated_at_iso }}");
+  const now = new Date();
+  const maxAgeHours = {{ max_data_age_hours }};
+  const ageHours = (now - generated) / 36e5;
+
+  function nyParts(date){
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone:"America/New_York",
+      year:"numeric",month:"2-digit",day:"2-digit",
+      weekday:"short",hour:"2-digit",minute:"2-digit",
+      hourCycle:"h23"
+    });
+    const out = {};
+    for(const p of fmt.formatToParts(date)){
+      if(p.type !== "literal") out[p.type] = p.value;
+    }
+    return out;
+  }
+
+  const n = nyParts(now);
+  const g = nyParts(generated);
+
+  const weekdays = ["Mon","Tue","Wed","Thu","Fri"];
+  const isWeekday = weekdays.includes(n.weekday);
+  const nowMin = Number(n.hour) * 60 + Number(n.minute);
+  const genMin = Number(g.hour) * 60 + Number(g.minute);
+  const sameNYDate = n.year === g.year && n.month === g.month && n.day === g.day;
+
+  let stale = ageHours > maxAgeHours;
+  let reason = stale ? "scan trop ancien" : "";
+
+  // Si le scan a été fait avant l'ouverture US, il devient obsolète
+  // dès 09:30 New York. Après la clôture, un scan antérieur à 16:00
+  // est également considéré comme obsolète.
+  if(isWeekday && nowMin >= 570 && nowMin < 960){
+    if(!sameNYDate || genMin < 570){
+      stale = true;
+      reason = "le marché US a ouvert depuis ce scan";
+    }
+  } else if(isWeekday && nowMin >= 960){
+    if(!sameNYDate || genMin < 960){
+      stale = true;
+      reason = "la clôture US est postérieure à ce scan";
+    }
+  }
+
+  const el = document.getElementById("freshness");
+
+  if(stale){
+    el.classList.add("stale");
+    el.textContent =
+      "⚠️ Données potentiellement obsolètes — " + reason +
+      ". Ne pas utiliser les niveaux sans relancer le scan.";
+  } else {
+    el.textContent =
+      "✓ Données à jour pour la préparation du plan (" +
+      ageHours.toFixed(1) + " h).";
+  }
+})();
+</script>
+
+</main>
+</body>
+</html>
 """
 
 
@@ -1663,27 +1931,43 @@ def send_telegram(
         print("Telegram secrets missing; notification skipped.")
         return
 
+    actionable = [
+        c for c in candidates
+        if c.final_decision in {"ACHAT CONDITIONNEL", "PRÉPARER ORDRE"}
+    ]
+
+    watch = [
+        c for c in candidates
+        if c.final_decision in {"ATTENDRE", "VÉRIFIER RÉSULTATS"}
+    ]
+
     lines = [
-        "📈 Trading Assistant v1.3",
+        "📈 Trading Assistant v1.3.1",
         f"Marché : {regime['color']} ({regime['score']}/100)",
-        f"Nouvelles positions autorisées : {regime['new_positions_allowed']}",
         "",
     ]
 
     if regime["color"] == "ROUGE":
-        lines.append("⛔ Aucun nouvel achat.")
-    elif not candidates:
-        lines.append("Aucun finaliste conforme aujourd'hui.")
+        lines.append("⛔ Aucun nouvel ordre : régime rouge.")
+    elif not actionable:
+        lines.append("✅ Aucun ordre validé aujourd'hui.")
     else:
-        for i, c in enumerate(candidates, 1):
+        lines.append(f"🎯 {len(actionable)} ordre(s) à traiter :")
+        lines.append("")
+
+        for c in actionable:
             lines += [
-                f"{i}. {c.ticker} — {c.final_decision}",
-                f"Scanner {c.status} | Score {c.score}/100 | Graph {c.chart_validation_score}/100",
-                f"Entrée {c.entry_trigger}$ | Max {c.buy_zone_max}$ | Stop {c.stop}$",
-                f"{c.shares} actions | risque {c.risk_eur}€",
-                f"Résultats : {c.next_earnings_date or 'INCONNU'}",
+                f"{c.ticker} — {c.final_decision}",
+                f"Entrée {c.entry_trigger}$ | Max {c.buy_zone_max}$",
+                f"Stop {c.stop}$ | {c.shares} actions | risque {c.risk_eur}€",
                 "",
             ]
+
+    if watch:
+        lines.append(
+            "À surveiller : " +
+            ", ".join(c.ticker for c in watch[:3])
+        )
 
     try:
         requests.post(
@@ -1695,7 +1979,7 @@ def send_telegram(
         print(f"Telegram error: {exc}")
 
 def main() -> None:
-    print("Starting Trading Assistant v1.3")
+    print("Starting Trading Assistant v1.3.1")
 
     regime = market_regime()
     eurusd = get_eurusd()
@@ -1831,9 +2115,38 @@ def main() -> None:
 
     candidates = enriched_candidates
 
+    actionable_candidates = [
+        asdict(c)
+        for c in candidates
+        if c.final_decision in {"ACHAT CONDITIONNEL", "PRÉPARER ORDRE"}
+    ]
+
+    watch_candidates = [
+        asdict(c)
+        for c in candidates
+        if c.final_decision in {"ATTENDRE", "VÉRIFIER RÉSULTATS", "BLOQUÉ RÉSULTATS"}
+    ]
+
+    rejected_candidates = [
+        asdict(c)
+        for c in candidates
+        if c.final_decision not in {
+            "ACHAT CONDITIONNEL",
+            "PRÉPARER ORDRE",
+            "ATTENDRE",
+            "VÉRIFIER RÉSULTATS",
+            "BLOQUÉ RÉSULTATS",
+        }
+    ]
+
+    next_watch = watch_candidates[:3]
+
+    generated_at_dt = datetime.now().astimezone()
+    generated_at_iso = generated_at_dt.isoformat()
+
     payload = {
-        "generated_at": datetime.now().astimezone().isoformat(),
-        "version": "1.3",
+        "generated_at": generated_at_iso,
+        "version": "1.3.1",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
@@ -1864,7 +2177,15 @@ def main() -> None:
         funnel=funnel,
         candidates=candidates,
         display_candidates=display_candidates,
-        generated_at=datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
+        actionable_candidates=actionable_candidates,
+        watch_candidates=watch_candidates,
+        rejected_candidates=rejected_candidates,
+        next_watch=next_watch,
+        generated_at=generated_at_dt.strftime("%d/%m/%Y %H:%M"),
+        generated_at_iso=generated_at_iso,
+        max_data_age_hours=float(
+            CONFIG.get("validation", {}).get("max_data_age_hours", 18)
+        ),
     )
 
     (DOCS / "index.html").write_text(
