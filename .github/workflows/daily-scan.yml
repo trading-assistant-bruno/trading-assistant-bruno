@@ -7,8 +7,8 @@ on:
     # On programme les deux heures possibles correspondant à 22h05 à Paris
     # (heure d'été / heure d'hiver), puis on garde uniquement l'exécution
     # dont l'heure locale Europe/Paris est bien 22h.
-- cron: "17 20 * * 1-5"
-- cron: "17 21 * * 1-5"
+    - cron: "17 20 * * 1-5"
+    - cron: "17 21 * * 1-5"
 
 permissions:
   contents: write
