@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     # GitHub Actions cron est en UTC.
-    # On programme les deux heures possibles correspondant à 22h05 à Paris
-    # (heure d'été / heure d'hiver), puis on garde uniquement l'exécution
-    # dont l'heure locale Europe/Paris est bien 22h.
+    # Deux horaires couvrent heure d'été et heure d'hiver à Paris.
+    # Le filtre ci-dessous ne conserve que l'exécution correspondant à 22h à Paris.
     - cron: "17 20 * * 1-5"
     - cron: "17 21 * * 1-5"
 
@@ -37,7 +36,7 @@ jobs:
 
           if [ "$PARIS_HOUR" = "22" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-           echo "Scheduled run matches 22:17 Europe/Paris."
+            echo "Scheduled run matches 22:17 Europe/Paris."
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping duplicate UTC schedule; Paris hour is ${PARIS_HOUR}."
