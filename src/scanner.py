@@ -1520,6 +1520,31 @@ def _news_is_recent(value, lookback_days: int) -> bool:
         return False
 
 
+
+def _company_target_alias(company_name: str) -> str:
+    """
+    Construit un alias court utilisable dans les regex M&A.
+    Ex.: "Talkspace, Inc." -> "talkspace"
+    """
+    name = str(company_name or "").lower()
+
+    # Retire ponctuation et suffixes juridiques usuels.
+    name = re.sub(r"[^\w\s-]", " ", name)
+    name = re.sub(
+        r"\b(incorporated|inc|corporation|corp|company|co|limited|ltd|plc|"
+        r"holdings|holding|group|sa|nv|ag)\b",
+        " ",
+        name,
+    )
+    name = re.sub(r"\s+", " ", name).strip()
+
+    # Evite des regex trop générales.
+    if len(name) < 3:
+        return ""
+
+    return name
+
+
 def detect_corporate_event(
     ticker: str,
     company_name: str,
@@ -1567,8 +1592,30 @@ def detect_corporate_event(
         r"\btender offer for\b",
         r"\bshareholders approve\b.*\bacquisition\b",
         r"\bshareholders approve\b.*\bmerger\b",
+        r"\bstockholders approve\b.*\bacquisition\b",
+        r"\bstockholders approve\b.*\bmerger\b",
         r"\bmerger agreement\b.*\bto be acquired\b",
     ]
+
+    # Détection spécifique du rôle de cible :
+    # "UHS to acquire Talkspace", "acquisition of Talkspace",
+    # "Talkspace stockholders approve acquisition", etc.
+    target_alias = _company_target_alias(company_name)
+
+    if target_alias:
+        escaped_alias = re.escape(target_alias)
+
+        strong_target_patterns.extend(
+            [
+                rf"\bto acquire\s+{escaped_alias}\b",
+                rf"\bacquisition of\s+{escaped_alias}\b",
+                rf"\bacquire all outstanding shares of\s+{escaped_alias}\b",
+                rf"\b{escaped_alias}\b.*\bto be acquired\b",
+                rf"\b{escaped_alias}\b.*\b(?:stockholders|shareholders)\b"
+                rf".*\b(?:approve|approved)\b.*\b(?:acquisition|merger)\b",
+                rf"\b{escaped_alias}\b.*\bmerger agreement\b",
+            ]
+        )
 
     generic_patterns = [
         r"\bdefinitive agreement\b",
@@ -1947,6 +1994,78 @@ def _cached_earnings(
     return result
 
 
+
+def _manual_verified_earnings(
+    ticker: str,
+    now: pd.Timestamp,
+) -> dict | None:
+    """
+    Date de résultats vérifiée manuellement dans config.yml.
+
+    Exemple :
+    validation:
+      manual_earnings_dates:
+        CM:
+          date: "2026-08-27"
+          source: "CIBC IR"
+
+    Une date passée est ignorée automatiquement afin de ne jamais
+    recycler une ancienne publication.
+    """
+    validation_cfg = CONFIG.get("validation", {})
+    manual_dates = validation_cfg.get("manual_earnings_dates", {}) or {}
+
+    entry = manual_dates.get(ticker.upper())
+
+    if entry is None:
+        return None
+
+    if isinstance(entry, str):
+        date_value = entry
+        source = "MANUEL VÉRIFIÉ"
+    elif isinstance(entry, dict):
+        date_value = entry.get("date")
+        source = str(
+            entry.get("source")
+            or "MANUEL VÉRIFIÉ"
+        )
+    else:
+        return None
+
+    ts = _to_utc_timestamp(date_value)
+
+    if ts is None:
+        print(f"{ticker}: invalid manual earnings date: {date_value}")
+        return None
+
+    if ts.normalize() < now.normalize():
+        print(
+            f"{ticker}: manual earnings date is past "
+            f"({ts.date().isoformat()}), ignoring."
+        )
+        return None
+
+    result = _earnings_result(
+        ts,
+        now,
+        source,
+    )
+
+    print(
+        f"{ticker}: earnings from verified manual override "
+        f"({result['next_earnings_date']})"
+    )
+
+    # Le cache garde également cette date comme filet de sécurité.
+    _cache_confirmed_earnings(
+        ticker,
+        ts,
+        source,
+    )
+
+    return result
+
+
 def fetch_next_earnings(
     ticker: str,
 ) -> dict:
@@ -1954,10 +2073,11 @@ def fetch_next_earnings(
     Date de résultats robuste.
 
     Ordre :
-    1) Yahoo calendar
-    2) Yahoo earnings_dates
-    3) retries automatiques
-    4) cache persistant data/earnings_cache.json
+    1) date manuelle vérifiée dans config.yml
+    2) Yahoo calendar
+    3) Yahoo earnings_dates
+    4) retries automatiques
+    5) cache persistant data/earnings_cache.json
 
     Si aucune source récente n'est disponible, le statut reste INCONNU
     et l'achat est bloqué par prudence.
@@ -1965,6 +2085,14 @@ def fetch_next_earnings(
     now = pd.Timestamp.now(
         tz="UTC"
     )
+
+    manual = _manual_verified_earnings(
+        ticker,
+        now,
+    )
+
+    if manual is not None:
+        return manual
 
     retries = int(
         CONFIG.get(
@@ -2504,7 +2632,7 @@ a{color:var(--blue);font-weight:700}
 <body>
 <main>
 
-<h1>Trading Assistant — v1.4.0</h1>
+<h1>Trading Assistant — v1.4.1</h1>
 
 <div id="freshness" class="fresh">Vérification de la fraîcheur des données…</div>
 
@@ -2759,7 +2887,7 @@ def send_telegram(
     ]
 
     lines = [
-        "📈 Trading Assistant v1.4.0",
+        "📈 Trading Assistant v1.4.1",
         f"Marché : {regime['color']} ({regime['score']}/100)",
         "",
     ]
@@ -2798,7 +2926,7 @@ def send_telegram(
         print(f"Telegram error: {exc}")
 
 def main() -> None:
-    print("Starting Trading Assistant v1.4.0")
+    print("Starting Trading Assistant v1.4.1")
 
     # Garantit l’existence du cache persistant pour le commit GitHub.
     _save_earnings_cache(_load_earnings_cache())
@@ -2968,7 +3096,7 @@ def main() -> None:
 
     payload = {
         "generated_at": generated_at_iso,
-        "version": "1.4.0",
+        "version": "1.4.1",
         "regime": regime,
         "eurusd": round(eurusd, 4),
         "spy_returns": {
