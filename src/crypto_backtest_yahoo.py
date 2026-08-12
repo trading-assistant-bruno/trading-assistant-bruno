@@ -90,8 +90,42 @@ def load_prices_yahoo() -> dict[str, pd.DataFrame]:
     return output
 
 
+def cap_positions_lagged(signal: pd.DataFrame, close: pd.DataFrame, max_positions: int) -> pd.DataFrame:
+    """Cap positions without using today's close to rank today's return.
+
+    portfolio_returns already shifts the eligibility signal by one day. Ranking must
+    therefore also be based only on information known at the previous close.
+    """
+    lagged_momentum = close.pct_change(28).shift(1)
+    out = pd.DataFrame(0.0, index=signal.index, columns=signal.columns)
+
+    for dt in signal.index:
+        eligible = signal.loc[dt]
+        candidates = eligible[eligible > 0].index.tolist()
+        if not candidates:
+            continue
+
+        ranked = (
+            lagged_momentum.loc[dt, candidates]
+            .dropna()
+            .sort_values(ascending=False)
+            .index.tolist()
+        )
+        chosen = ranked[:max_positions]
+        if chosen:
+            out.loc[dt, chosen] = 1.0 / len(chosen)
+
+    return out
+
+
 if __name__ == "__main__":
     # GitHub-hosted runners can receive HTTP 451 from Binance depending on region.
     # Keep the strategy engine unchanged and swap only the historical data source.
     base.load_prices = load_prices_yahoo
+
+    # Critical anti-look-ahead fix: the original prototype ranked eligible coins
+    # using the current day's close while also applying that day's return.
+    # This replacement uses only prior-close information for ranking.
+    base.cap_positions = cap_positions_lagged
+
     base.main()
