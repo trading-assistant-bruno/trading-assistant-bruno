@@ -21,7 +21,7 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
 def get_sp500_point_in_time_data_fixed4() -> tuple[set[str], list[dict], set[str]]:
     params = {
         "action": "parse",
-        "page": "List_of_S%26P_500_companies",
+        "page": "List of S&P 500 companies",
         "prop": "text",
         "format": "json",
         "formatversion": "2",
@@ -33,7 +33,7 @@ def get_sp500_point_in_time_data_fixed4() -> tuple[set[str], list[dict], set[str
     if isinstance(html, dict):
         html = html.get("*")
     if not html:
-        raise RuntimeError("MediaWiki parse API returned no rendered HTML")
+        raise RuntimeError(f"MediaWiki parse API returned no rendered HTML: {payload}")
 
     tables = [flatten(t) for t in pd.read_html(io.StringIO(html))]
     current = next((t for t in tables if len(t) > 490 and any("symbol" in c.lower() for c in t.columns)), None)
@@ -48,7 +48,6 @@ def get_sp500_point_in_time_data_fixed4() -> tuple[set[str], list[dict], set[str
             break
 
     if changes is None:
-        # Fallback: choose the large table whose first column contains many dates.
         best = (0, None)
         for t in tables:
             if t.shape[1] < 5 or len(t) < 50:
@@ -75,8 +74,6 @@ def get_sp500_point_in_time_data_fixed4() -> tuple[set[str], list[dict], set[str
     added_col = next((c for c in cols if "added" in c.lower() and ("ticker" in c.lower() or "symbol" in c.lower())), None)
     removed_col = next((c for c in cols if "removed" in c.lower() and ("ticker" in c.lower() or "symbol" in c.lower())), None)
 
-    # Wikipedia commonly flattens these to: Date, Added Ticker, Added Security,
-    # Removed Ticker, Removed Security, Reason.
     if added_col is None and len(cols) >= 2:
         added_col = cols[1]
     if removed_col is None and len(cols) >= 4:
