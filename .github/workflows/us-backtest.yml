@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - "src/us_backtest.py"
-      - "src/us_backtest_fixed4.py"
+      - "src/us_backtest_fixed5.py"
       - "us_backtest_config.yml"
       - ".github/workflows/us-backtest.yml"
 
@@ -34,7 +34,7 @@ jobs:
           pip install lxml
 
       - name: Run US backtest
-        run: python src/us_backtest_fixed4.py
+        run: python src/us_backtest_fixed5.py
 
       - name: Upload backtest artifacts
         uses: actions/upload-artifact@v4
