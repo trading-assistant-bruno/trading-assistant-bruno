@@ -22,7 +22,7 @@ def get_sp500_point_in_time_data_fixed5() -> tuple[set[str], list[dict], set[str
     r = requests.get(REST_HTML, headers={"User-Agent": "trading-assistant-bruno/1.0"}, timeout=30)
     r.raise_for_status()
     html = r.text
-    if not html or "S&P 500 component stocks" not in html:
+    if not html or len(html) < 100_000:
         raise RuntimeError(f"Wikipedia REST HTML invalid; status={r.status_code}, bytes={len(html)}")
 
     tables = [flatten(t) for t in pd.read_html(io.StringIO(html))]
