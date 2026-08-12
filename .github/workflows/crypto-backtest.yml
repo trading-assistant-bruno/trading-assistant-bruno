@@ -1,0 +1,50 @@
+name: Crypto strategy backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run crypto backtest
+        run: python src/crypto_backtest.py
+
+      - name: Upload backtest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-backtest-results
+          path: |
+            data/crypto/backtest_results.csv
+            data/crypto/backtest_annual_returns.csv
+            data/crypto/backtest_robustness.csv
+            data/crypto/backtest_results.json
+
+      - name: Commit results on branch
+        run: |
+          git config user.name "trading-assistant-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/crypto/backtest_results.csv data/crypto/backtest_annual_returns.csv data/crypto/backtest_robustness.csv data/crypto/backtest_results.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update crypto backtest results"
+            git push
+          else
+            echo "No result changes to commit"
+          fi
