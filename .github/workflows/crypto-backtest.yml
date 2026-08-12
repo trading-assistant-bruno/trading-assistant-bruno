@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "src/crypto_backtest.py"
+      - "src/crypto_backtest_yahoo.py"
       - "crypto_config.yml"
       - ".github/workflows/crypto-backtest.yml"
 
@@ -31,7 +32,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run crypto backtest
-        run: python src/crypto_backtest.py
+        run: python src/crypto_backtest_yahoo.py
 
       - name: Upload backtest artifacts
         uses: actions/upload-artifact@v4
