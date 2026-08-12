@@ -8,6 +8,7 @@ on:
       - "src/us_backtest.py"
       - "src/us_backtest_fixed.py"
       - "src/us_backtest_fixed2.py"
+      - "src/us_backtest_fixed3.py"
       - "us_backtest_config.yml"
       - ".github/workflows/us-backtest.yml"
 
@@ -35,7 +36,7 @@ jobs:
           pip install lxml
 
       - name: Run US backtest
-        run: python src/us_backtest_fixed2.py
+        run: python src/us_backtest_fixed3.py
 
       - name: Upload backtest artifacts
         uses: actions/upload-artifact@v4
