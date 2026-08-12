@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     # GitHub Actions cron est en UTC.
-    # Deux horaires couvrent heure d'été et heure d'hiver à Paris.
-    # Le filtre ci-dessous ne conserve que l'exécution correspondant à 22h à Paris.
+    # 20:17 UTC correspond à 22:17 Paris en heure d'été.
+    # 21:17 UTC correspond à 22:17 Paris en heure d'hiver.
     - cron: "17 20 * * 1-5"
     - cron: "17 21 * * 1-5"
 
@@ -25,6 +25,8 @@ jobs:
       - name: Check Paris schedule
         id: timing
         shell: bash
+        env:
+          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -32,14 +34,17 @@ jobs:
             exit 0
           fi
 
-          PARIS_HOUR=$(TZ=Europe/Paris date +%H)
+          PARIS_OFFSET=$(TZ=Europe/Paris date +%z)
 
-          if [ "$PARIS_HOUR" = "22" ]; then
+          if [ "$PARIS_OFFSET" = "+0200" ] && [ "$TRIGGER_SCHEDULE" = "17 20 * * 1-5" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled run matches 22:17 Europe/Paris."
+            echo "Summer schedule selected (20:17 UTC -> 22:17 Paris)."
+          elif [ "$PARIS_OFFSET" = "+0100" ] && [ "$TRIGGER_SCHEDULE" = "17 21 * * 1-5" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Winter schedule selected (21:17 UTC -> 22:17 Paris)."
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping duplicate UTC schedule; Paris hour is ${PARIS_HOUR}."
+            echo "Skipping duplicate schedule. Trigger=${TRIGGER_SCHEDULE}, Paris offset=${PARIS_OFFSET}."
           fi
 
       - name: Checkout repository
