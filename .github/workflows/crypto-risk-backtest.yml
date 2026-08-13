@@ -1,0 +1,47 @@
+name: Crypto risk-normalized backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [crypto-risk-backtest]
+    paths:
+      - "src/crypto_risk_backtest.py"
+      - "src/crypto_backtest.py"
+      - "src/crypto_backtest_yahoo.py"
+      - "crypto_config.yml"
+      - "crypto_risk_config.yml"
+      - ".github/workflows/crypto-risk-backtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run risk-normalized crypto backtest
+        run: python src/crypto_risk_backtest.py
+
+      - name: Upload risk backtest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-risk-backtest-results
+          path: |
+            data/crypto_risk/risk_backtest_results.csv
+            data/crypto_risk/risk_backtest_annual_returns.csv
+            data/crypto_risk/risk_backtest_trades.csv
+            data/crypto_risk/risk_backtest_results.json

@@ -1,0 +1,48 @@
+capital: 10000
+risk_per_trade_pct: 0.5
+max_positions: 4
+max_position_equity_pct: 25.0
+
+execution:
+  commission_pct_one_way: 0.18
+  minimum_commission_usd: 1.75
+  slippage_pct_one_way: 0.05
+
+risk:
+  atr_days: 14
+  swing_low_days: 20
+  stops:
+    - name: atr_2_0
+      type: atr
+      multiplier: 2.0
+    - name: atr_2_5
+      type: atr
+      multiplier: 2.5
+    - name: swing_20
+      type: swing
+      lookback_days: 20
+
+exits:
+  - name: sma100
+    type: sma
+    window_days: 100
+  - name: atr_trail_3
+    type: atr_trail
+    multiplier: 3.0
+  - name: target_2r
+    type: target_r
+    multiple: 2.0
+  - name: target_3r
+    type: target_r
+    multiple: 3.0
+
+strategy:
+  signal: D_hybrid
+  ranking_momentum_days: 28
+  common_regime_exit: true
+
+notes:
+  - "Entries are decided from the previous daily close and executed at the next daily open."
+  - "Protective stops behave as stop-market orders; gaps are filled at the opening price plus modeled slippage."
+  - "If stop and profit target are both touched on the same daily candle, the stop is assumed to occur first (conservative)."
+  - "Position size is capped at 25% of equity, so four simultaneous positions cannot intentionally exceed 100% gross exposure."
