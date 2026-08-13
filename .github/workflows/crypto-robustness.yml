@@ -1,0 +1,49 @@
+name: Crypto robustness stress test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [crypto-robustness]
+    paths:
+      - "src/crypto_robustness.py"
+      - "src/crypto_risk_backtest.py"
+      - "src/crypto_backtest.py"
+      - "src/crypto_backtest_yahoo.py"
+      - "crypto_config.yml"
+      - "crypto_risk_config.yml"
+      - ".github/workflows/crypto-robustness.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run crypto robustness stress test
+        run: python src/crypto_robustness.py
+
+      - name: Upload robustness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-robustness-results
+          path: |
+            data/crypto_robustness/robustness_results.csv
+            data/crypto_robustness/leave_one_out_summary.csv
+            data/crypto_robustness/robustness_trades.csv
+            data/crypto_robustness/baseline_symbol_contributions.csv
+            data/crypto_robustness/robustness_results.json
