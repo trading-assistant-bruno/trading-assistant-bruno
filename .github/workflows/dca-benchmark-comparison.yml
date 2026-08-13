@@ -1,0 +1,31 @@
+name: DCA benchmark comparison
+
+on:
+  push:
+    branches: [dca-benchmark-comparison]
+    paths:
+      - "src/dca_benchmark_comparison.py"
+      - ".github/workflows/dca-benchmark-comparison.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python src/dca_benchmark_comparison.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dca-benchmark-comparison
+          path: |
+            data/dca_comparison/dca_benchmark_comparison.csv
+            data/dca_comparison/dca_benchmark_comparison.json
