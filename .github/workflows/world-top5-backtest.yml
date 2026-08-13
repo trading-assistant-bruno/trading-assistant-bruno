@@ -1,0 +1,35 @@
+name: World top-5 backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [world-top5-backtest]
+    paths:
+      - "src/world_top5_backtest.py"
+      - ".github/workflows/world-top5-backtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python src/world_top5_backtest.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: world-top5-backtest-results
+          path: |
+            data/world_top5/world_top5_comparison.csv
+            data/world_top5/world_top5_comparison.json
+            data/world_top5/top5_rebalance_history.csv
+            data/world_top5/top5_lump_equity_curves.csv
+            data/world_top5/share_data_coverage.csv
