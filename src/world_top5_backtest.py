@@ -11,6 +11,9 @@ ANNUAL_OUT = ROOT / "data" / "world_top5_annual"
 
 
 def main() -> None:
+    # CompaniesMarketCap canonical route for Alphabet (Google).
+    annual.CANDIDATES["GOOGL"] = "alphabet-google"
+
     # The earlier quarterly reconstruction based on Yahoo historical share counts was
     # rejected after split-basis inconsistencies were detected. Use direct published
     # end-of-year market-cap data instead; annual.py documents the remaining limits.
