@@ -21,9 +21,8 @@ INITIAL_CAPITAL = 10_000.0
 TURNOVER_COST_ONE_WAY = 0.001  # 10 bps stress assumption, not an ETF/broker quote
 
 # Broad set of US mega-caps that could plausibly occupy the very top of MSCI World
-# during the test window. MSCI World top ranks were US-dominated in this period.
-# This is NOT an official historical MSCI constituent file: the limitation is reported
-# explicitly in the output.
+# during the test window. This is intentionally broader than the eventual top five.
+# It is NOT an official historical MSCI constituent file; that limitation is explicit.
 CANDIDATES = [
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA",
     "JPM", "JNJ", "V", "WMT", "XOM", "UNH", "PG", "MA", "AVGO", "HD",
@@ -64,7 +63,7 @@ def download_prices(tickers: list[str]) -> dict[str, pd.DataFrame]:
         end=END_EXCLUSIVE,
         interval="1d",
         auto_adjust=False,
-        actions=False,
+        actions=True,
         group_by="ticker",
         threads=True,
         progress=False,
@@ -75,17 +74,18 @@ def download_prices(tickers: list[str]) -> dict[str, pd.DataFrame]:
     for ticker, x in frames.items():
         if isinstance(x.columns, pd.MultiIndex):
             x.columns = x.columns.get_level_values(0)
-        required = ["Open", "Close"]
-        if not all(c in x.columns for c in required):
+        if not all(c in x.columns for c in ["Open", "Close"]):
             continue
         if "Adj Close" not in x.columns:
             x["Adj Close"] = x["Close"]
+        if "Stock Splits" not in x.columns:
+            x["Stock Splits"] = 0.0
         x.index = pd.to_datetime(x.index).tz_localize(None)
         clean[ticker] = x.sort_index()
     return clean
 
 
-def get_shares_series(ticker: str) -> pd.Series:
+def raw_shares_series(ticker: str) -> pd.Series:
     try:
         s = yf.Ticker(ticker).get_shares_full(start="2016-12-01", end=END_EXCLUSIVE)
         if s is None or len(s) == 0:
@@ -95,11 +95,46 @@ def get_shares_series(ticker: str) -> pd.Series:
         if getattr(idx, "tz", None) is not None:
             idx = idx.tz_convert(None)
         s.index = idx.normalize()
-        s = s[~s.index.duplicated(keep="last")].sort_index()
-        return s
+        return s[~s.index.duplicated(keep="last")].sort_index()
     except Exception as exc:
         print(f"shares unavailable {ticker}: {exc}")
         return pd.Series(dtype=float)
+
+
+def split_adjusted_shares(ticker: str, raw: pd.Series, price_frame: pd.DataFrame) -> tuple[pd.Series, float]:
+    """Put historical shares on the same split-adjusted basis as Yahoo historical Close.
+
+    Yahoo historical Close is adjusted for stock splits. get_shares_full reports the
+    actual share count at the historical date. For a 4-for-1 split that occurs later,
+    an old share count must therefore be multiplied by 4 before multiplying it by the
+    split-adjusted historical Close.
+    """
+    if raw.empty:
+        return raw, 1.0
+
+    splits = price_frame.get("Stock Splits", pd.Series(index=price_frame.index, dtype=float)).fillna(0.0)
+    splits = splits[(splits > 0) & (splits != 1.0)].astype(float).sort_index()
+
+    adjusted = raw.copy().astype(float)
+    for d in adjusted.index:
+        future = splits[splits.index > d]
+        factor = float(future.prod()) if len(future) else 1.0
+        adjusted.at[d] = float(adjusted.at[d]) * factor
+
+    adjusted = adjusted.replace([np.inf, -np.inf], np.nan).dropna()
+    adjusted = adjusted[adjusted > 0].sort_index()
+
+    # META historical share observations in Yahoo begin after the FB -> META ticker
+    # change. Backfilling the earliest known split-adjusted count is a documented
+    # approximation and is safer than silently excluding META from all early rankings.
+    start_ts = pd.Timestamp(DATA_START)
+    if not adjusted.empty and adjusted.index.min() > start_ts:
+        adjusted.loc[start_ts] = float(adjusted.iloc[0])
+        adjusted = adjusted.sort_index()
+
+    future_from_start = splits[splits.index > start_ts]
+    start_factor = float(future_from_start.prod()) if len(future_from_start) else 1.0
+    return adjusted, start_factor
 
 
 def last_value_on_or_before(series: pd.Series, date: pd.Timestamp) -> float:
@@ -120,7 +155,6 @@ def close_on_or_before(df: pd.DataFrame, date: pd.Timestamp, col: str) -> float:
 
 
 def trading_calendar(frames: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
-    # Use URTH calendar for developed-equity trading days.
     idx = frames["URTH"].index
     return idx[(idx >= START) & (idx < pd.Timestamp(END_EXCLUSIVE))]
 
@@ -222,22 +256,26 @@ def simulate_top5(
         return value
 
     for dt in calendar:
-        # Monthly contribution. A DCA means cash arrives over time; this is not a staged
-        # deployment of money that was available from day one.
         if dca and dt in month_first:
             cash += MONTHLY_CONTRIBUTION
             cashflows.append((dt, -MONTHLY_CONTRIBUTION))
 
-        # Quarterly point-in-time rank and full rebalance.
         if dt in rebal_dates:
             capw = target_history[dt]
             names = list(capw)
             current_weights = ({t: 1.0 / len(names) for t in names} if equal_weight else dict(capw))
 
             before = portfolio_value(dt)
-            current_values = {t: holdings.get(t, 0.0) * float(adj.at[dt, t]) for t in set(holdings) | set(current_weights) if t in adj.columns and pd.notna(adj.at[dt, t])}
+            current_values = {
+                t: holdings.get(t, 0.0) * float(adj.at[dt, t])
+                for t in set(holdings) | set(current_weights)
+                if t in adj.columns and pd.notna(adj.at[dt, t])
+            }
             desired_values = {t: before * w for t, w in current_weights.items()}
-            turnover_notional = 0.5 * sum(abs(desired_values.get(t, 0.0) - current_values.get(t, 0.0)) for t in set(current_values) | set(desired_values))
+            turnover_notional = 0.5 * sum(
+                abs(desired_values.get(t, 0.0) - current_values.get(t, 0.0))
+                for t in set(current_values) | set(desired_values)
+            )
             cost = turnover_notional * TURNOVER_COST_ONE_WAY
             total_cost += cost
             after_cost = max(0.0, before - cost)
@@ -248,7 +286,6 @@ def simulate_top5(
                 if math.isfinite(px) and px > 0:
                     holdings[t] = after_cost * w / px
         elif dca and dt in month_first and current_weights:
-            # Invest only the new monthly contribution between quarterly rebalances.
             investable = min(cash, MONTHLY_CONTRIBUTION)
             cost = investable * TURNOVER_COST_ONE_WAY
             total_cost += cost
@@ -313,7 +350,7 @@ def performance_stats(equity: pd.Series) -> dict:
     }
 
 
-def benchmark_stats(df: pd.DataFrame, name: str) -> tuple[dict, dict]:
+def benchmark_stats(df: pd.DataFrame) -> tuple[dict, dict]:
     x = df.loc[df.index >= START].copy()
     adj = x["Adj Close"].dropna().astype(float)
     normalized = adj / adj.iloc[0] * INITIAL_CAPITAL
@@ -346,24 +383,36 @@ def main() -> None:
     if "IWMO.L" not in prices:
         print("WARNING: IWMO.L unavailable; momentum benchmark will be omitted")
 
-    print("Downloading historical shares outstanding...")
-    shares = {t: get_shares_series(t) for t in CANDIDATES}
+    print("Downloading and split-adjusting historical shares outstanding...")
+    shares: dict[str, pd.Series] = {}
     coverage_rows = []
     for t in CANDIDATES:
-        s = shares[t]
+        raw = raw_shares_series(t)
+        if t in prices:
+            adjusted, factor = split_adjusted_shares(t, raw, prices[t])
+        else:
+            adjusted, factor = raw, 1.0
+        shares[t] = adjusted
         coverage_rows.append({
             "ticker": t,
-            "share_observations": int(len(s)),
-            "first_share_date": s.index.min().date().isoformat() if len(s) else None,
-            "last_share_date": s.index.max().date().isoformat() if len(s) else None,
+            "raw_share_observations": int(len(raw)),
+            "adjusted_share_observations": int(len(adjusted)),
+            "first_raw_share_date": raw.index.min().date().isoformat() if len(raw) else None,
+            "first_adjusted_share_date": adjusted.index.min().date().isoformat() if len(adjusted) else None,
+            "last_share_date": adjusted.index.max().date().isoformat() if len(adjusted) else None,
+            "cumulative_split_factor_after_2017_start": factor,
         })
     pd.DataFrame(coverage_rows).to_csv(OUT / "share_data_coverage.csv", index=False)
 
     cal = trading_calendar(prices)
     target_history, rank_df = top5_history(prices, shares, cal)
     rank_df.to_csv(OUT / "top5_rebalance_history.csv", index=False)
+
     print("\n=== TOP 5 HISTORY ===")
-    print(rank_df[[c for c in rank_df.columns if c.startswith("rebalance") or c.startswith("rank_") and (c.endswith("ticker") or c.endswith("cap_weight"))]].to_string(index=False))
+    display_cols = ["rebalance_date", "ranking_date"]
+    for i in range(1, 6):
+        display_cols.extend([f"rank_{i}_ticker", f"rank_{i}_cap_weight"])
+    print(rank_df[display_cols].to_string(index=False))
 
     adj = adjusted_price_matrix(prices, cal)
     rows = []
@@ -371,7 +420,7 @@ def main() -> None:
 
     for label, equal in [("Top5_equal_weight", True), ("Top5_cap_weight", False)]:
         lump_eq, _, _, lump_cost = simulate_top5(adj, target_history, equal, dca=False)
-        dca_eq, dca_cf, dca_final, dca_cost = simulate_top5(adj, target_history, equal, dca=True)
+        _, dca_cf, dca_final, dca_cost = simulate_top5(adj, target_history, equal, dca=True)
         lump = performance_stats(lump_eq)
         rows.append({
             "strategy": label,
@@ -387,7 +436,7 @@ def main() -> None:
     for name, ticker in BENCHMARKS.items():
         if ticker not in prices:
             continue
-        lump, dca = benchmark_stats(prices[ticker], name)
+        lump, dca = benchmark_stats(prices[ticker])
         rows.append({
             "strategy": name,
             **lump,
@@ -404,9 +453,10 @@ def main() -> None:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "analysis_period": [START.date().isoformat(), str(cal[-1].date())],
         "method": {
-            "selection": "Top 5 by full historical market capitalization at the prior trading day before each quarterly rebalance, from the declared mega-cap candidate pool.",
+            "selection": "Top 5 by reconstructed full historical market capitalization at the prior trading day before each quarterly rebalance, from the declared mega-cap candidate pool.",
+            "split_handling": "Historical shares outstanding are multiplied by all future split factors so that they match Yahoo's split-adjusted historical Close basis.",
             "equal_weight": "20% each at quarterly rebalance; monthly DCA cash is allocated to current holdings between rebalances.",
-            "cap_weight": "Proportional to full market cap within the five selected names at quarterly rebalance.",
+            "cap_weight": "Proportional to reconstructed full market cap within the five selected names at quarterly rebalance.",
             "transaction_cost_assumption": TURNOVER_COST_ONE_WAY,
             "benchmarks": BENCHMARKS,
         },
@@ -414,6 +464,7 @@ def main() -> None:
             "This is not an official point-in-time reconstruction of MSCI World. Historical constituent-level free-float-adjusted market-cap data are proprietary and are not present in this repository.",
             "Ranking uses full market capitalization from Yahoo historical prices times historical shares outstanding, whereas MSCI uses free-float-adjusted market capitalization.",
             "The candidate universe is a broad US mega-cap pool chosen to cover plausible top-rank MSCI World names in 2018-2026; omission of a true historical top-five constituent would bias results.",
+            "META share history before the FB-to-META ticker change is approximated by backfilling the earliest available split-adjusted share count.",
             "BRK-B share-count representation may not perfectly reproduce Berkshire Hathaway aggregate market capitalization across share classes.",
             "URTH is a liquid ETF proxy for MSCI World; IWMO.L is an ETF proxy for MSCI World Momentum. ETF tracking, fees, listing currency and taxes can differ from index returns.",
             "Backtest results are historical and are not forecasts."
