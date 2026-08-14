@@ -17,7 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'data' / 'top5_buffer'
 OUT.mkdir(parents=True, exist_ok=True)
 
-ARCHIVE = 'https://handwiki.org/wiki/Finance%3AList_of_public_corporations_by_market_capitalization'
+ARCHIVES = [
+    'https://reference.org/facts/List_of_public_corporations_by_market_capitalization/3zIFBx5h',
+    'https://www.wikizero.org/wiki/en/List_of_public_corporations_by_market_capitalization',
+    'https://www.olps.co.za/kiwix/content/wikipedia_en_all_maxi_2024-01/A/List_of_public_corporations_by_market_capitalization',
+]
 HEAD = {'User-Agent': 'Mozilla/5.0'}
 
 
@@ -37,24 +41,39 @@ def parse_num(text: str) -> float:
     return float(vals[-1].replace(',', ''))
 
 
+def load_archive_soup():
+    errors=[]
+    for url in ARCHIVES:
+        try:
+            r=requests.get(url,timeout=40,headers=HEAD,verify=False)
+            r.raise_for_status(); soup=BeautifulSoup(r.text,'html.parser')
+            texts=[h.get_text(' ',strip=True) for h in soup.find_all(['h1','h2','h3','h4','h5','h6'])]
+            if any(re.match(r'^\s*1999\b',t) for t in texts) and any(re.match(r'^\s*2022\b',t) for t in texts):
+                print('archive source',url,'title',soup.title.get_text(' ',strip=True) if soup.title else '')
+                return soup,url
+            errors.append(f'{url}: headings sample={texts[:15]}')
+        except Exception as e:
+            errors.append(f'{url}: {type(e).__name__}: {e}')
+    raise RuntimeError('No complete archive source. ' + ' | '.join(errors))
+
+
 def archived_rows_1999_2022():
-    html = requests.get(ARCHIVE, timeout=40, headers=HEAD).text
-    soup = BeautifulSoup(html, 'html.parser')
+    soup,source_url = load_archive_soup()
     all_rows = []
     for year in range(1999, 2023):
         heading = None
-        for h in soup.find_all(['h2','h3','h4']):
+        for h in soup.find_all(['h1','h2','h3','h4','h5','h6']):
             txt=h.get_text(' ', strip=True)
-            if h.find(id=str(year)) is not None or re.match(rf'^\s*{year}\b', txt):
+            if h.get('id')==str(year) or h.find(id=str(year)) is not None or re.match(rf'^\s*{year}\b', txt):
                 heading = h
                 break
         if heading is None:
-            raise RuntimeError(f'Archive heading missing {year}')
+            raise RuntimeError(f'Archive heading missing {year} from {source_url}')
         table = heading.find_next('table')
-        trs = table.find_all('tr')
-        if not trs:
+        if table is None:
             raise RuntimeError(f'Archive table missing {year}')
-        header = [x.get_text(' ', strip=True) for x in trs[0].find_all(['th','td'])]
+        trs = table.find_all('tr')
+        header = [x.get_text(' ', strip=True) for x in trs[0].find_all(['th','td'])] if trs else []
         quarterly = any('Fourth quarter' in x for x in header)
         rows=[]
         for tr in trs[1:]:
@@ -210,7 +229,7 @@ def main():
     payload={
         'generated_at':datetime.now(timezone.utc).isoformat(),
         'method':'Annual market-cap weighted Top5. Fixed buffer keeps up to five incumbents while they remain in the global Top10 and fills vacancies from current eligible Top5. Expanded buffer keeps all incumbents still global Top10 and adds all current eligible Top5.',
-        'source':'FT/HandWiki archived global Top10 1999-2022; CompaniesMarketCap time machine 2023-2025; developed/unmapped exclusions follow prior Top5 experiment.',
+        'source':'FT historical global Top10 1999-2022 via public mirrors; CompaniesMarketCap time machine 2023-2025; developed/unmapped exclusions follow prior Top5 experiment.',
         'important_limitation':'For 1999-2022 the buffer threshold is GLOBAL Top10, not exact developed-market Top10, because the historical public table only exposes global Top10. This is a conservative retention rule when emerging-market firms occupy global slots.',
         'results':res.replace({np.nan:None,np.inf:None,-np.inf:None}).to_dict('records'),
         'turnover':turn.to_dict('records'),
