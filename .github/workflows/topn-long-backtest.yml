@@ -1,0 +1,36 @@
+name: Top-N concentration backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - topn-long-backtest
+    paths:
+      - 'src/topn_long_backtest.py'
+      - '.github/workflows/topn-long-backtest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0 beautifulsoup4
+      - run: python src/topn_long_backtest.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: topn-long-backtest-results
+          path: |
+            data/topn_long/results.csv
+            data/topn_long/results.json
+            data/topn_long/long_equity.csv
+            data/topn_long/recent_equity.csv
+            data/topn_long/recent_rankings_top20.csv
