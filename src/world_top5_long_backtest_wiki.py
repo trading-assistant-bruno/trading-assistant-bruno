@@ -58,19 +58,32 @@ def ntt_docomo_2001_proxy(calendar):
     return synthetic.astype(float)
 
 
-def build_prices(rankings):
-    world_df = msci.get_levels('990100', '2000-01-01', '2026-08-14', variant='NETR')
-    if world_df is None or len(world_df) == 0:
-        raise RuntimeError('MSCI World NETR public-level data unavailable')
-    world_df = world_df.copy()
-    world_df['DATE'] = pd.to_datetime(world_df['DATE'], errors='coerce')
-    world_df['LEVEL'] = pd.to_numeric(world_df['LEVEL'], errors='coerce')
-    world = world_df.dropna(subset=['DATE', 'LEVEL']).set_index('DATE')['LEVEL'].sort_index()
+def get_full_world_history():
+    # MSCI's chart endpoint may truncate very long requests. Fetch in two chunks
+    # so the dot-com period is explicitly present rather than silently omitted.
+    chunks = [
+        msci.get_levels('990100', '2000-01-01', '2012-12-31', variant='NETR'),
+        msci.get_levels('990100', '2013-01-01', '2026-08-14', variant='NETR'),
+    ]
+    frames = [x for x in chunks if x is not None and len(x)]
+    if len(frames) != 2:
+        raise RuntimeError('MSCI World NETR public-level chunks unavailable')
+    df = pd.concat(frames, ignore_index=True)
+    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    df['LEVEL'] = pd.to_numeric(df['LEVEL'], errors='coerce')
+    world = df.dropna(subset=['DATE', 'LEVEL']).set_index('DATE')['LEVEL'].sort_index()
     world.index = pd.to_datetime(world.index).tz_localize(None)
     world = world[~world.index.duplicated(keep='last')]
+    if world.index.min() > pd.Timestamp('2000-01-10'):
+        raise RuntimeError(f'MSCI World history does not include Jan 2000: {world.index.min()}')
+    return world
+
+
+def build_prices(rankings):
+    world = get_full_world_history()
     cal = world.index[(world.index >= backtest.START) & (world.index < pd.Timestamp(backtest.END_EXCLUSIVE))]
     world = world.reindex(cal).astype(float)
-    if len(world) < 5000:
+    if len(world) < 6500:
         raise RuntimeError(f'MSCI World history unexpectedly short: {len(world)} rows')
 
     raw = {}
@@ -87,8 +100,6 @@ def build_prices(rankings):
 
     mat = pd.DataFrame(index=cal)
     for ticker in selected:
-        # Forward-fill is necessary one day into the following holding year so the
-        # annual rebalance can liquidate outgoing constituents at their last known close.
         mat[ticker] = raw[ticker].reindex(cal).ffill()
 
     for year, group in rankings.groupby('holding_year'):
