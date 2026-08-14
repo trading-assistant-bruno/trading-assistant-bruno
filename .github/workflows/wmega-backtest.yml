@@ -1,0 +1,35 @@
+name: WMEGA backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - wmega-backtest
+    paths:
+      - 'src/wmega_backtest.py'
+      - '.github/workflows/wmega-backtest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0
+      - run: python src/wmega_backtest.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wmega-backtest-results
+          path: |
+            data/wmega_backtest/results.csv
+            data/wmega_backtest/results.json
+            data/wmega_backtest/equity.csv
+            data/wmega_backtest/annual_returns_pct.csv
