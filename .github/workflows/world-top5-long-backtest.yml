@@ -1,0 +1,34 @@
+name: World Top-5 long backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [world-top5-long-backtest]
+    paths:
+      - "src/world_top5_long_backtest.py"
+      - ".github/workflows/world-top5-long-backtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python src/world_top5_long_backtest.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: world-top5-long-results
+          path: |
+            data/world_top5_long/results.csv
+            data/world_top5_long/results.json
+            data/world_top5_long/rankings.csv
+            data/world_top5_long/equity.csv
+            data/world_top5_long/annual_returns_pct.csv
