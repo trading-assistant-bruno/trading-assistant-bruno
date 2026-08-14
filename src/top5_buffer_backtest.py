@@ -23,6 +23,7 @@ ARCHIVES = [
     'https://www.olps.co.za/kiwix/content/wikipedia_en_all_maxi_2024-01/A/List_of_public_corporations_by_market_capitalization',
 ]
 HEAD = {'User-Agent': 'Mozilla/5.0'}
+TEST_START = pd.Timestamp('2001-01-02')
 
 
 def identify(text: str):
@@ -38,7 +39,10 @@ def parse_num(text: str) -> float:
     vals = re.findall(r'\d[\d,.]*', text.replace('\xa0', ' '))
     if not vals:
         return float('nan')
-    return float(vals[-1].replace(',', ''))
+    # Historical cells can contain citation numbers after the market cap.
+    # The market-cap number is the largest numeric token in the cell.
+    nums=[float(v.replace(',', '')) for v in vals]
+    return max(nums)
 
 
 def load_archive_soup():
@@ -118,6 +122,9 @@ def ranking_table():
     counts=df.groupby('holding_year').size()
     if df.holding_year.min()!=2000 or df.holding_year.max()!=2026 or (counts<5).any():
         raise RuntimeError('Ranking coverage invalid')
+    # Sanity check against footnote/citation parsing mistakes.
+    if (df.market_cap <= 1000).any():
+        raise RuntimeError('Implausibly small historical market cap; parser likely captured a citation number')
     df.to_csv(OUT/'eligible_global_top10_by_year.csv',index=False)
     return df
 
@@ -195,7 +202,10 @@ def turnover_summary(selections):
 
 
 def main():
-    ranks=ranking_table()
+    full_ranks=ranking_table()
+    # Start in 2001 to avoid adding a new proxy for NTT (9432.T) in calendar 2000.
+    # This matches the common long window used in the prior Top5/WMEGA comparisons.
+    ranks=full_ranks[full_ranks.holding_year>=2001].copy()
     t_pure,s_pure=pure_top5_targets(ranks)
     t_fixed,s_fixed=buffer_targets(ranks,False)
     t_exp,s_exp=buffer_targets(ranks,True)
@@ -204,6 +214,9 @@ def main():
     turn=turnover_summary(sels); turn.to_csv(OUT/'selection_turnover.csv',index=False)
 
     cal,mat,world=longsrc.build_prices(ranks[['source_year','holding_year','ticker','currency','market_cap']].copy())
+    cal=cal[cal>=TEST_START]
+    mat=mat.reindex(cal)
+    world=world.reindex(cal)
 
     variants={
         'MSCI_World':(0.0,t_pure),
@@ -228,9 +241,10 @@ def main():
     (pd.DataFrame(annuals)*100).to_csv(OUT/'annual_returns_pct.csv')
     payload={
         'generated_at':datetime.now(timezone.utc).isoformat(),
+        'period':[str(cal[0].date()),str(cal[-1].date())],
         'method':'Annual market-cap weighted Top5. Fixed buffer keeps up to five incumbents while they remain in the global Top10 and fills vacancies from current eligible Top5. Expanded buffer keeps all incumbents still global Top10 and adds all current eligible Top5.',
-        'source':'FT historical global Top10 1999-2022 via public mirrors; CompaniesMarketCap time machine 2023-2025; developed/unmapped exclusions follow prior Top5 experiment.',
-        'important_limitation':'For 1999-2022 the buffer threshold is GLOBAL Top10, not exact developed-market Top10, because the historical public table only exposes global Top10. This is a conservative retention rule when emerging-market firms occupy global slots.',
+        'source':'FT historical global Top10 2000-2022 via public mirrors; CompaniesMarketCap time machine 2023-2025; developed/unmapped exclusions follow prior Top5 experiment.',
+        'important_limitation':'For 2000-2022 the buffer threshold is GLOBAL Top10, not exact developed-market Top10, because the historical public table only exposes global Top10. This is a conservative retention rule when emerging-market firms occupy global slots.',
         'results':res.replace({np.nan:None,np.inf:None,-np.inf:None}).to_dict('records'),
         'turnover':turn.to_dict('records'),
     }
