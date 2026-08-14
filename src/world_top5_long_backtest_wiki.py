@@ -39,13 +39,6 @@ def frozen_rankings():
 
 
 def ntt_docomo_2001_proxy(calendar):
-    """USD-return proxy for the one unavailable delisted constituent.
-
-    NTT Docomo's published USD stock-price performance for 2001 is +51.0%.
-    We preserve QQQ's actual 2001 daily volatility pattern and add a constant log
-    drift so the synthetic series ends exactly +51%. This affects only NTT Docomo's
-    ~17.8% share of the Top-5 sleeve in holding year 2001.
-    """
     qqq = backtest.download_one('QQQ')
     if qqq is None or qqq.empty:
         raise RuntimeError('QQQ unavailable for NTT Docomo 2001 proxy')
@@ -60,16 +53,12 @@ def ntt_docomo_2001_proxy(calendar):
     adjusted.iloc[1:] = adjusted.iloc[1:] + drift
     synthetic = 100.0 * np.exp(adjusted.cumsum())
     synthetic.iloc[0] = 100.0
-    # Re-normalize exactly to +51% in case of floating-point drift.
     scale_log = math.log(1.51 / (float(synthetic.iloc[-1]) / float(synthetic.iloc[0])))
-    ramp = np.linspace(0.0, scale_log, len(synthetic))
-    synthetic = synthetic * np.exp(ramp)
+    synthetic = synthetic * np.exp(np.linspace(0.0, scale_log, len(synthetic)))
     return synthetic.astype(float)
 
 
 def build_prices(rankings):
-    # MSCI World Net Total Return in USD from the same public chart-level endpoint
-    # that powers MSCI's index charts.
     world_df = msci.get_levels('990100', '2000-01-01', '2026-08-14', variant='NETR')
     if world_df is None or len(world_df) == 0:
         raise RuntimeError('MSCI World NETR public-level data unavailable')
@@ -98,14 +87,10 @@ def build_prices(rankings):
 
     mat = pd.DataFrame(index=cal)
     for ticker in selected:
-        if ticker == '9437.T':
-            s = raw[ticker].reindex(cal)
-            # The proxy is deliberately defined only for 2001; no other year holds it.
-            mat[ticker] = s
-        else:
-            mat[ticker] = raw[ticker].reindex(cal).ffill()
+        # Forward-fill is necessary one day into the following holding year so the
+        # annual rebalance can liquidate outgoing constituents at their last known close.
+        mat[ticker] = raw[ticker].reindex(cal).ffill()
 
-    # Validate each security only in years in which it is actually held.
     for year, group in rankings.groupby('holding_year'):
         dates = cal[cal.year == int(year)]
         if len(dates) == 0:
