@@ -6,6 +6,7 @@ on:
     branches: [world-top5-long-backtest]
     paths:
       - "src/world_top5_long_backtest.py"
+      - "src/world_top5_long_backtest_wiki.py"
       - ".github/workflows/world-top5-long-backtest.yml"
 
 permissions:
@@ -22,7 +23,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python src/world_top5_long_backtest.py
+      - run: python src/world_top5_long_backtest_wiki.py
       - uses: actions/upload-artifact@v4
         with:
           name: world-top5-long-results
