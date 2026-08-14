@@ -1,8 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import math
+import re
+import time
 
 import numpy as np
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 from mscidata import msci
 
 import world_top5_long_backtest as backtest
@@ -58,24 +63,82 @@ def ntt_docomo_2001_proxy(calendar):
     return synthetic.astype(float)
 
 
-def get_full_world_history():
-    # MSCI's chart endpoint may truncate very long requests. Fetch in two chunks
-    # so the dot-com period is explicitly present rather than silently omitted.
-    chunks = [
-        msci.get_levels('990100', '2000-01-01', '2012-12-31', variant='NETR'),
-        msci.get_levels('990100', '2013-01-01', '2026-08-14', variant='NETR'),
-    ]
-    frames = [x for x in chunks if x is not None and len(x)]
-    if len(frames) != 2:
-        raise RuntimeError('MSCI World NETR public-level chunks unavailable')
-    df = pd.concat(frames, ignore_index=True)
+def parse_msci_world_archive(date: pd.Timestamp):
+    ds = date.strftime('%Y%m%d')
+    url = f'https://www.msci.com/eqb/esg/indexperf/asof/{ds}.html'
+    for attempt in range(3):
+        try:
+            r = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            text = BeautifulSoup(r.text, 'html.parser').get_text(' ', strip=True)
+            # Archive row format starts with 'MSCI World' followed by the index level.
+            m = re.search(r'MSCI\s+World\s+([0-9][0-9,]*\.?[0-9]*)\s', text, flags=re.I)
+            if m:
+                return date, float(m.group(1).replace(',', ''))
+        except Exception:
+            if attempt == 2:
+                return None
+            time.sleep(0.4 * (attempt + 1))
+    return None
+
+
+def get_msci_world_price_2000():
+    # Use SPY only as a trading-day calendar; the World levels themselves come from MSCI.
+    spy = backtest.download_one('SPY')
+    if spy is None or spy.empty:
+        raise RuntimeError('SPY unavailable for 2000 trading calendar')
+    dates = [pd.Timestamp(d) for d in spy.index if pd.Timestamp('2000-01-01') <= d <= pd.Timestamp('2000-12-29')]
+    found = []
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futures = {ex.submit(parse_msci_world_archive, d): d for d in dates}
+        for fut in as_completed(futures):
+            item = fut.result()
+            if item is not None:
+                found.append(item)
+    if len(found) < 235:
+        raise RuntimeError(f'Only {len(found)} official MSCI World archive sessions found for 2000')
+    s = pd.Series({d: level for d, level in found}, dtype=float).sort_index()
+    # Sanity check against MSCI's published 12/29/2000 price level 1,221.253.
+    last = s.loc[:pd.Timestamp('2000-12-29')].iloc[-1]
+    if abs(float(last) - 1221.253) > 0.02:
+        raise RuntimeError(f'Unexpected MSCI World archive endpoint for 2000: {last}')
+    return s
+
+
+def get_netr_from_2000_12_29():
+    # The public chart endpoint's earliest NETR observation is 2000-12-29.
+    df = msci.get_levels('990100', '2000-12-29', '2026-08-14', variant='NETR')
+    if df is None or len(df) == 0:
+        raise RuntimeError('MSCI World NETR public-level data unavailable')
+    df = df.copy()
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
     df['LEVEL'] = pd.to_numeric(df['LEVEL'], errors='coerce')
-    world = df.dropna(subset=['DATE', 'LEVEL']).set_index('DATE')['LEVEL'].sort_index()
-    world.index = pd.to_datetime(world.index).tz_localize(None)
+    s = df.dropna(subset=['DATE', 'LEVEL']).set_index('DATE')['LEVEL'].sort_index()
+    s.index = pd.to_datetime(s.index).tz_localize(None)
+    return s[~s.index.duplicated(keep='last')]
+
+
+def get_full_world_history():
+    price_2000 = get_msci_world_price_2000()
+    netr = get_netr_from_2000_12_29()
+    if netr.index.min() > pd.Timestamp('2000-12-31'):
+        raise RuntimeError(f'MSCI NETR starts too late: {netr.index.min()}')
+
+    # Scale the official 2000 Price index path to meet the exact NETR series at the
+    # common 29-Dec-2000 observation. This preserves every official 2000 World price
+    # daily return while avoiding a level discontinuity. It is conservative because
+    # dividends are omitted from 2000 only; NETR is exact from the join onward.
+    join = pd.Timestamp('2000-12-29')
+    price_join = float(price_2000.loc[:join].iloc[-1])
+    netr_join = float(netr.loc[:join].iloc[-1])
+    bridge = price_2000 * (netr_join / price_join)
+    bridge = bridge[bridge.index < join]
+    world = pd.concat([bridge, netr]).sort_index()
     world = world[~world.index.duplicated(keep='last')]
     if world.index.min() > pd.Timestamp('2000-01-10'):
-        raise RuntimeError(f'MSCI World history does not include Jan 2000: {world.index.min()}')
+        raise RuntimeError(f'World bridge does not include Jan 2000: {world.index.min()}')
     return world
 
 
@@ -83,7 +146,7 @@ def build_prices(rankings):
     world = get_full_world_history()
     cal = world.index[(world.index >= backtest.START) & (world.index < pd.Timestamp(backtest.END_EXCLUSIVE))]
     world = world.reindex(cal).astype(float)
-    if len(world) < 6500:
+    if len(world) < 6650:
         raise RuntimeError(f'MSCI World history unexpectedly short: {len(world)} rows')
 
     raw = {}
