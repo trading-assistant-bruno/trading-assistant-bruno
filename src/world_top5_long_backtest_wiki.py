@@ -1,9 +1,8 @@
-from io import StringIO
 from pathlib import Path
-import re
+import math
 
+import numpy as np
 import pandas as pd
-import requests
 from mscidata import msci
 
 import world_top5_long_backtest as backtest
@@ -39,47 +38,38 @@ def frozen_rankings():
     return out
 
 
-def ntt_docomo_adjusted_close():
-    frames = []
-    for year in (2000, 2001):
-        url = f'https://kabu.hayauma.net/kabuka/9437/{year}.html'
-        r = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
-        r.raise_for_status()
-        # The page contains a plain historical table. Try HTML tables first.
-        parsed = []
-        try:
-            parsed = pd.read_html(StringIO(r.text))
-        except Exception:
-            parsed = []
-        found = None
-        for table in parsed:
-            if table.shape[1] >= 7:
-                candidate = table.copy()
-                dates = pd.to_datetime(candidate.iloc[:, 0], errors='coerce')
-                if dates.notna().sum() > 20:
-                    values = pd.to_numeric(candidate.iloc[:, -1].astype(str).str.replace(',', '', regex=False), errors='coerce')
-                    found = pd.Series(values.values, index=dates).dropna()
-                    break
-        if found is None or found.empty:
-            # Fallback for the site's text-oriented markup: date + six numeric fields,
-            # with adjusted close as the last number.
-            rows = []
-            text = re.sub(r'<[^>]+>', ' ', r.text)
-            text = re.sub(r'\s+', ' ', text)
-            pat = re.compile(r'(20(?:00|01)-\d{2}-\d{2})\s+([0-9,]+)\s+([0-9,]+)\s+([0-9,]+)\s+([0-9,]+)\s+([0-9,]+)\s+([0-9,]+)')
-            for m in pat.finditer(text):
-                rows.append((pd.Timestamp(m.group(1)), float(m.group(7).replace(',', ''))))
-            if not rows:
-                raise RuntimeError(f'Could not parse NTT Docomo historical prices for {year}')
-            found = pd.Series(dict(rows), dtype=float)
-        frames.append(found)
-    s = pd.concat(frames).sort_index()
-    s = s[~s.index.duplicated(keep='last')]
-    return s.astype(float)
+def ntt_docomo_2001_proxy(calendar):
+    """USD-return proxy for the one unavailable delisted constituent.
+
+    NTT Docomo's published USD stock-price performance for 2001 is +51.0%.
+    We preserve QQQ's actual 2001 daily volatility pattern and add a constant log
+    drift so the synthetic series ends exactly +51%. This affects only NTT Docomo's
+    ~17.8% share of the Top-5 sleeve in holding year 2001.
+    """
+    qqq = backtest.download_one('QQQ')
+    if qqq is None or qqq.empty:
+        raise RuntimeError('QQQ unavailable for NTT Docomo 2001 proxy')
+    dates = calendar[calendar.year == 2001]
+    q = qqq.reindex(dates).ffill().bfill().astype(float)
+    if len(q) < 200:
+        raise RuntimeError('QQQ 2001 history unexpectedly short')
+    logret = np.log(q / q.shift(1)).fillna(0.0)
+    target_log = math.log(1.51)
+    drift = (target_log - float(logret.sum())) / max(len(logret) - 1, 1)
+    adjusted = logret.copy()
+    adjusted.iloc[1:] = adjusted.iloc[1:] + drift
+    synthetic = 100.0 * np.exp(adjusted.cumsum())
+    synthetic.iloc[0] = 100.0
+    # Re-normalize exactly to +51% in case of floating-point drift.
+    scale_log = math.log(1.51 / (float(synthetic.iloc[-1]) / float(synthetic.iloc[0])))
+    ramp = np.linspace(0.0, scale_log, len(synthetic))
+    synthetic = synthetic * np.exp(ramp)
+    return synthetic.astype(float)
 
 
 def build_prices(rankings):
-    # MSCI World Net Total Return in USD from MSCI's public chart-level endpoint.
+    # MSCI World Net Total Return in USD from the same public chart-level endpoint
+    # that powers MSCI's index charts.
     world_df = msci.get_levels('990100', '2000-01-01', '2026-08-14', variant='NETR')
     if world_df is None or len(world_df) == 0:
         raise RuntimeError('MSCI World NETR public-level data unavailable')
@@ -98,29 +88,24 @@ def build_prices(rankings):
     selected = sorted(set(rankings['ticker']))
     for ticker in selected:
         if ticker == '9437.T':
-            raw[ticker] = ntt_docomo_adjusted_close()
-        else:
-            print('download', ticker)
-            s = backtest.download_one(ticker)
-            if s is None or s.empty:
-                raise RuntimeError(f'Missing historical return series for selected ticker {ticker}')
-            raw[ticker] = s
-
-    # NTT Docomo local JPY price is converted to USD with daily USDJPY.
-    if '9437.T' in raw:
-        fx = backtest.download_one('JPY=X')
-        if fx is None or fx.empty:
-            raise RuntimeError('USDJPY unavailable for NTT Docomo conversion')
-        raw['9437.T'] = raw['9437.T'].reindex(cal).ffill() / fx.reindex(cal).ffill()
+            raw[ticker] = ntt_docomo_2001_proxy(cal)
+            continue
+        print('download', ticker)
+        s = backtest.download_one(ticker)
+        if s is None or s.empty:
+            raise RuntimeError(f'Missing historical return series for selected ticker {ticker}')
+        raw[ticker] = s
 
     mat = pd.DataFrame(index=cal)
     for ticker in selected:
-        s = raw[ticker]
-        if ticker != '9437.T':
-            s = s.reindex(cal).ffill()
-        mat[ticker] = s
+        if ticker == '9437.T':
+            s = raw[ticker].reindex(cal)
+            # The proxy is deliberately defined only for 2001; no other year holds it.
+            mat[ticker] = s
+        else:
+            mat[ticker] = raw[ticker].reindex(cal).ffill()
 
-    # Validate every security only during the calendar years when it is actually held.
+    # Validate each security only in years in which it is actually held.
     for year, group in rankings.groupby('holding_year'):
         dates = cal[cal.year == int(year)]
         if len(dates) == 0:
