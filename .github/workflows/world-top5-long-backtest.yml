@@ -7,6 +7,7 @@ on:
     paths:
       - "src/world_top5_long_backtest.py"
       - "src/world_top5_long_backtest_wiki.py"
+      - "data/world_top5_long_reference_rankings.csv"
       - ".github/workflows/world-top5-long-backtest.yml"
 
 permissions:
@@ -23,6 +24,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0
       - run: python src/world_top5_long_backtest_wiki.py
       - uses: actions/upload-artifact@v4
         with:
