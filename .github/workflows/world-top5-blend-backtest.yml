@@ -6,7 +6,8 @@ on:
     branches: [world-top5-backtest]
     paths:
       - "src/world_top5_blend_backtest.py"
-      - "src/world_top5_annual_cmc.py"
+      - "src/world_top5_blend_backtest_frozen.py"
+      - "data/world_top5_reference_rankings.csv"
       - ".github/workflows/world-top5-blend-backtest.yml"
 
 permissions:
@@ -24,7 +25,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python src/world_top5_blend_backtest.py
+      - run: python src/world_top5_blend_backtest_frozen.py
       - uses: actions/upload-artifact@v4
         with:
           name: world-top5-blend-results
