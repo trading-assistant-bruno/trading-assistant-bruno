@@ -1,0 +1,38 @@
+name: Top5 buffer backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - top5-buffer-backtest
+    paths:
+      - 'src/top5_buffer_backtest.py'
+      - '.github/workflows/top5-buffer-backtest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0 beautifulsoup4
+      - run: python src/top5_buffer_backtest.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top5-buffer-backtest-results
+          path: |
+            data/top5_buffer/results.csv
+            data/top5_buffer/results.json
+            data/top5_buffer/equity.csv
+            data/top5_buffer/annual_returns_pct.csv
+            data/top5_buffer/annual_selections.csv
+            data/top5_buffer/selection_turnover.csv
+            data/top5_buffer/eligible_global_top10_by_year.csv
