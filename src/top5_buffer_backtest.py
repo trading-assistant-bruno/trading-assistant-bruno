@@ -44,7 +44,8 @@ def archived_rows_1999_2022():
     for year in range(1999, 2023):
         heading = None
         for h in soup.find_all(['h2','h3','h4']):
-            if h.get_text(' ', strip=True) == str(year):
+            txt=h.get_text(' ', strip=True)
+            if h.find(id=str(year)) is not None or re.match(rf'^\s*{year}\b', txt):
                 heading = h
                 break
         if heading is None:
@@ -69,7 +70,7 @@ def archived_rows_1999_2022():
             target = cells[-1] if quarterly else (cells[1] + ' ' + cells[-1] if len(cells)>1 else cells[-1])
             hit=identify(target)
             if not hit:
-                continue  # non-developed / unmapped names are intentionally excluded
+                continue
             alias,ticker,ccy=hit
             cap=parse_num(target if quarterly else cells[-1])
             if math.isfinite(cap) and cap>0:
@@ -83,7 +84,6 @@ def archived_rows_1999_2022():
 def recent_rows_2023_2025():
     out=[]
     for year in [2023,2024,2025]:
-        # fetch enough developed names, retain only those whose GLOBAL rank is <=10
         rows=topn.fetch_developed_ranking(year,20)
         rows=[r for r in rows if int(r['global_rank']) <= 10]
         if len(rows) < 5:
@@ -122,7 +122,7 @@ def buffer_targets(df, expanded=False):
         if not held:
             new=list(current_top5)
         elif expanded:
-            survivors=[t for t in held if t in current]  # incumbent survives while still global Top10
+            survivors=[t for t in held if t in current]
             new=list(survivors)
             for t in current_top5:
                 if t not in new:
@@ -184,7 +184,6 @@ def main():
     pd.DataFrame(sels).to_csv(OUT/'annual_selections.csv',index=False)
     turn=turnover_summary(sels); turn.to_csv(OUT/'selection_turnover.csv',index=False)
 
-    # Reuse the same long-horizon world bridge, Yahoo price handling and NTT Docomo proxy as prior test.
     cal,mat,world=longsrc.build_prices(ranks[['source_year','holding_year','ticker','currency','market_cap']].copy())
 
     variants={
