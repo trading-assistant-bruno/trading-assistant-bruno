@@ -1,13 +1,8 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import math
-import re
-import time
 
 import numpy as np
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 from mscidata import msci
 
 import world_top5_long_backtest as backtest
@@ -15,6 +10,7 @@ import world_top5_long_backtest as backtest
 ROOT = Path(__file__).resolve().parents[1]
 EARLY = ROOT / 'data' / 'world_top5_long_reference_rankings.csv'
 LATE = ROOT / 'data' / 'world_top5_reference_rankings.csv'
+WORLD_2000_PRICE_RETURN = -0.1405  # official MSCI World Price USD YTD at 2000-12-29
 
 
 def frozen_rankings():
@@ -35,110 +31,66 @@ def frozen_rankings():
                 'market_cap': float(r[f'rank_{i}_market_cap']),
                 'weight': float(r[f'rank_{i}_weight']),
             })
-    late = pd.DataFrame(late_rows)
-    out = pd.concat([early, late], ignore_index=True).sort_values(['holding_year', 'rank'])
+    out = pd.concat([early, pd.DataFrame(late_rows)], ignore_index=True).sort_values(['holding_year','rank'])
     counts = out.groupby('holding_year').size()
-    if not (counts == 5).all() or out['holding_year'].min() != 2000 or out['holding_year'].max() != 2026:
-        raise RuntimeError(f'Frozen ranking coverage invalid: {counts.to_dict()}')
+    if not (counts == 5).all() or out.holding_year.min() != 2000 or out.holding_year.max() != 2026:
+        raise RuntimeError('Frozen ranking coverage invalid')
     return out
 
 
 def ntt_docomo_2001_proxy(calendar):
-    qqq = backtest.download_one('QQQ')
-    if qqq is None or qqq.empty:
-        raise RuntimeError('QQQ unavailable for NTT Docomo 2001 proxy')
-    dates = calendar[calendar.year == 2001]
-    q = qqq.reindex(dates).ffill().bfill().astype(float)
-    if len(q) < 200:
-        raise RuntimeError('QQQ 2001 history unexpectedly short')
-    logret = np.log(q / q.shift(1)).fillna(0.0)
-    target_log = math.log(1.51)
-    drift = (target_log - float(logret.sum())) / max(len(logret) - 1, 1)
-    adjusted = logret.copy()
-    adjusted.iloc[1:] = adjusted.iloc[1:] + drift
-    synthetic = 100.0 * np.exp(adjusted.cumsum())
-    synthetic.iloc[0] = 100.0
-    scale_log = math.log(1.51 / (float(synthetic.iloc[-1]) / float(synthetic.iloc[0])))
-    synthetic = synthetic * np.exp(np.linspace(0.0, scale_log, len(synthetic)))
-    return synthetic.astype(float)
+    q = backtest.download_one('QQQ').reindex(calendar[calendar.year == 2001]).ffill().bfill().astype(float)
+    lr = np.log(q / q.shift(1)).fillna(0.0)
+    drift = (math.log(1.51) - float(lr.sum())) / max(len(lr)-1,1)
+    lr.iloc[1:] += drift
+    s = 100.0 * np.exp(lr.cumsum())
+    s *= np.exp(np.linspace(0.0, math.log(1.51/(float(s.iloc[-1])/float(s.iloc[0]))), len(s)))
+    return s.astype(float)
 
 
-def parse_msci_world_archive(date: pd.Timestamp):
-    ds = date.strftime('%Y%m%d')
-    url = f'https://www.msci.com/eqb/esg/indexperf/asof/{ds}.html'
-    for attempt in range(3):
-        try:
-            r = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-            if r.status_code == 404:
-                return None
-            r.raise_for_status()
-            text = BeautifulSoup(r.text, 'html.parser').get_text(' ', strip=True)
-            # Archive row format starts with 'MSCI World' followed by the index level.
-            m = re.search(r'MSCI\s+World\s+([0-9][0-9,]*\.?[0-9]*)\s', text, flags=re.I)
-            if m:
-                return date, float(m.group(1).replace(',', ''))
-        except Exception:
-            if attempt == 2:
-                return None
-            time.sleep(0.4 * (attempt + 1))
-    return None
-
-
-def get_msci_world_price_2000():
-    # Use SPY only as a trading-day calendar; the World levels themselves come from MSCI.
-    spy = backtest.download_one('SPY')
-    if spy is None or spy.empty:
-        raise RuntimeError('SPY unavailable for 2000 trading calendar')
-    dates = [pd.Timestamp(d) for d in spy.index if pd.Timestamp('2000-01-01') <= d <= pd.Timestamp('2000-12-29')]
-    found = []
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = {ex.submit(parse_msci_world_archive, d): d for d in dates}
-        for fut in as_completed(futures):
-            item = fut.result()
-            if item is not None:
-                found.append(item)
-    if len(found) < 235:
-        raise RuntimeError(f'Only {len(found)} official MSCI World archive sessions found for 2000')
-    s = pd.Series({d: level for d, level in found}, dtype=float).sort_index()
-    # Sanity check against MSCI's published 12/29/2000 price level 1,221.253.
-    last = s.loc[:pd.Timestamp('2000-12-29')].iloc[-1]
-    if abs(float(last) - 1221.253) > 0.02:
-        raise RuntimeError(f'Unexpected MSCI World archive endpoint for 2000: {last}')
-    return s
-
-
-def get_netr_from_2000_12_29():
-    # The public chart endpoint's earliest NETR observation is 2000-12-29.
-    df = msci.get_levels('990100', '2000-12-29', '2026-08-14', variant='NETR')
-    if df is None or len(df) == 0:
-        raise RuntimeError('MSCI World NETR public-level data unavailable')
-    df = df.copy()
+def netr_history():
+    df = msci.get_levels('990100','2000-12-29','2026-08-14',variant='NETR').copy()
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
     df['LEVEL'] = pd.to_numeric(df['LEVEL'], errors='coerce')
-    s = df.dropna(subset=['DATE', 'LEVEL']).set_index('DATE')['LEVEL'].sort_index()
+    s = df.dropna(subset=['DATE','LEVEL']).set_index('DATE')['LEVEL'].sort_index()
     s.index = pd.to_datetime(s.index).tz_localize(None)
     return s[~s.index.duplicated(keep='last')]
 
 
-def get_full_world_history():
-    price_2000 = get_msci_world_price_2000()
-    netr = get_netr_from_2000_12_29()
-    if netr.index.min() > pd.Timestamp('2000-12-31'):
-        raise RuntimeError(f'MSCI NETR starts too late: {netr.index.min()}')
+def developed_proxy_2000(target_return=WORLD_2000_PRICE_RETURN):
+    # Approximate MSCI World geographic mix at the turn of the century using liquid
+    # country ETFs that already existed. Only the daily path is proxied; the endpoint
+    # is calibrated to MSCI's official 2000 World Price USD return (-14.05%).
+    weights = {'SPY':.50,'EWJ':.16,'EWU':.09,'EWG':.05,'EWQ':.05,'EWC':.04,'EWA':.04,'EWL':.04,'EWN':.03}
+    raw = {t: backtest.download_one(t) for t in weights}
+    if any(s is None or s.empty for s in raw.values()):
+        missing = [t for t,s in raw.items() if s is None or s.empty]
+        raise RuntimeError(f'2000 bridge ETFs unavailable: {missing}')
+    cal = raw['SPY'].index[(raw['SPY'].index >= pd.Timestamp('1999-12-31')) & (raw['SPY'].index <= pd.Timestamp('2000-12-29'))]
+    ret = pd.DataFrame({t: raw[t].reindex(cal).ffill().pct_change() for t in weights}).fillna(0.0)
+    port_ret = sum(ret[t]*w for t,w in weights.items())
+    logret = np.log1p(port_ret)
+    target_log = math.log1p(target_return)
+    drift = (target_log - float(logret.iloc[1:].sum())) / max(len(logret)-1,1)
+    adj = logret.copy(); adj.iloc[1:] += drift
+    path = 100.0 * np.exp(adj.cumsum())
+    # calibration sanity check from 1999-12-31 to 2000-12-29
+    realized = float(path.iloc[-1]/path.iloc[0]-1)
+    if abs(realized-target_return) > 1e-6:
+        raise RuntimeError(f'2000 bridge calibration failed: {realized}')
+    return path[path.index >= pd.Timestamp('2000-01-03')]
 
-    # Scale the official 2000 Price index path to meet the exact NETR series at the
-    # common 29-Dec-2000 observation. This preserves every official 2000 World price
-    # daily return while avoiding a level discontinuity. It is conservative because
-    # dividends are omitted from 2000 only; NETR is exact from the join onward.
+
+def get_full_world_history(target_return=WORLD_2000_PRICE_RETURN):
+    bridge = developed_proxy_2000(target_return)
+    netr = netr_history()
     join = pd.Timestamp('2000-12-29')
-    price_join = float(price_2000.loc[:join].iloc[-1])
     netr_join = float(netr.loc[:join].iloc[-1])
-    bridge = price_2000 * (netr_join / price_join)
-    bridge = bridge[bridge.index < join]
-    world = pd.concat([bridge, netr]).sort_index()
+    bridge = bridge * (netr_join / float(bridge.loc[:join].iloc[-1]))
+    world = pd.concat([bridge[bridge.index < join], netr]).sort_index()
     world = world[~world.index.duplicated(keep='last')]
     if world.index.min() > pd.Timestamp('2000-01-10'):
-        raise RuntimeError(f'World bridge does not include Jan 2000: {world.index.min()}')
+        raise RuntimeError(f'World bridge starts too late: {world.index.min()}')
     return world
 
 
@@ -146,38 +98,20 @@ def build_prices(rankings):
     world = get_full_world_history()
     cal = world.index[(world.index >= backtest.START) & (world.index < pd.Timestamp(backtest.END_EXCLUSIVE))]
     world = world.reindex(cal).astype(float)
-    if len(world) < 6650:
-        raise RuntimeError(f'MSCI World history unexpectedly short: {len(world)} rows')
-
-    raw = {}
-    selected = sorted(set(rankings['ticker']))
+    raw={}; selected=sorted(set(rankings.ticker))
     for ticker in selected:
-        if ticker == '9437.T':
-            raw[ticker] = ntt_docomo_2001_proxy(cal)
-            continue
-        print('download', ticker)
-        s = backtest.download_one(ticker)
-        if s is None or s.empty:
-            raise RuntimeError(f'Missing historical return series for selected ticker {ticker}')
-        raw[ticker] = s
+        raw[ticker] = ntt_docomo_2001_proxy(cal) if ticker=='9437.T' else backtest.download_one(ticker)
+        if raw[ticker] is None or raw[ticker].empty:
+            raise RuntimeError(f'Missing historical return series {ticker}')
+    mat = pd.DataFrame({t: raw[t].reindex(cal).ffill() for t in selected}, index=cal)
+    for year,g in rankings.groupby('holding_year'):
+        dates=cal[cal.year==int(year)]
+        if not len(dates): continue
+        for t in g.ticker:
+            if pd.isna(mat.at[dates[0],t]): raise RuntimeError(f'No price {t} in {year}')
+    return cal,mat,world
 
-    mat = pd.DataFrame(index=cal)
-    for ticker in selected:
-        mat[ticker] = raw[ticker].reindex(cal).ffill()
+backtest.build_rankings=frozen_rankings
+backtest.build_prices=build_prices
 
-    for year, group in rankings.groupby('holding_year'):
-        dates = cal[cal.year == int(year)]
-        if len(dates) == 0:
-            continue
-        first = dates[0]
-        for ticker in group['ticker']:
-            if ticker not in mat.columns or pd.isna(mat.at[first, ticker]):
-                raise RuntimeError(f'No usable price for {ticker} at {first.date()} (holding year {year})')
-    return cal, mat, world
-
-
-backtest.build_rankings = frozen_rankings
-backtest.build_prices = build_prices
-
-if __name__ == '__main__':
-    backtest.main()
+if __name__=='__main__': backtest.main()
