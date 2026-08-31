@@ -7,6 +7,7 @@ on:
       - meta-regime-backtest
     paths:
       - 'src/meta_regime_backtest.py'
+      - 'src/meta_regime_backtest_v2.py'
       - '.github/workflows/meta-regime-backtest.yml'
 
 jobs:
@@ -21,7 +22,7 @@ jobs:
           cache: 'pip'
       - run: pip install -r requirements.txt
       - run: pip install msci-data==1.0.0
-      - run: python src/meta_regime_backtest.py
+      - run: python src/meta_regime_backtest_v2.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -37,4 +38,5 @@ jobs:
             data/meta_regime_backtest/universe_coverage.csv
             data/meta_regime_backtest/regime_summary.csv
             data/meta_regime_backtest/selection_summary.csv
+            data/meta_regime_backtest/active_transactions.csv
           if-no-files-found: warn
