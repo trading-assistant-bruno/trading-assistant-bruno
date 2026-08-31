@@ -1,5 +1,6 @@
 name: Active momentum backtest
 
+# Price-only active momentum research workflow.
 on:
   workflow_dispatch:
   push:
