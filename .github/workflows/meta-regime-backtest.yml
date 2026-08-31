@@ -1,0 +1,40 @@
+name: Meta regime backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - meta-regime-backtest
+    paths:
+      - 'src/meta_regime_backtest.py'
+      - '.github/workflows/meta-regime-backtest.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0
+      - run: python src/meta_regime_backtest.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meta-regime-backtest-results
+          path: |
+            data/meta_regime_backtest/results.csv
+            data/meta_regime_backtest/results.json
+            data/meta_regime_backtest/subperiod_results.csv
+            data/meta_regime_backtest/annual_returns_pct.csv
+            data/meta_regime_backtest/equity_curves.csv
+            data/meta_regime_backtest/monthly_decisions.csv
+            data/meta_regime_backtest/regime_features.csv
+            data/meta_regime_backtest/universe_coverage.csv
+            data/meta_regime_backtest/regime_summary.csv
+            data/meta_regime_backtest/selection_summary.csv
+          if-no-files-found: warn
