@@ -1,0 +1,37 @@
+name: Active momentum monthly rotation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - active-momentum-backtest
+    paths:
+      - 'src/active_momentum_rotation.py'
+      - '.github/workflows/active-momentum-rotation.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0
+      - run: python src/active_momentum_rotation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-momentum-rotation-results
+          path: |
+            data/active_momentum_rotation/results.csv
+            data/active_momentum_rotation/results.json
+            data/active_momentum_rotation/subperiod_results.csv
+            data/active_momentum_rotation/annual_returns_pct.csv
+            data/active_momentum_rotation/equity_curves.csv
+            data/active_momentum_rotation/transactions.csv
+            data/active_momentum_rotation/universe_coverage.csv
+          if-no-files-found: warn
