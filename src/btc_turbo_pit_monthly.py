@@ -30,11 +30,14 @@ def fetch(dt):
  url=f'https://coinmarketcap.com/historical/{dt:%Y%m%d}/'; err=''
  for a in range(3):
   try:
-   r=requests.get(url,headers=HEADERS,timeout=25); r.raise_for_status(); table=None
+   r=requests.get(url,headers=HEADERS,timeout=25); r.raise_for_status()
+   candidates=[]
    for t in pd.read_html(io.StringIO(r.text)):
     cols=[str(c).strip() for c in t.columns]
-    if 'Rank' in cols and 'Symbol' in cols and 'Price' in cols: table=t.copy(); break
-   if table is None: raise RuntimeError('ranking table missing')
+    if 'Rank' in cols and 'Symbol' in cols and 'Price' in cols and len(t)>0:
+     candidates.append(t)
+   if not candidates: raise RuntimeError('populated ranking table missing')
+   table=max(candidates,key=len).copy()
    table.columns=[str(c).strip() for c in table.columns]; z=table[['Rank','Name','Symbol','Price']].copy()
    z['Rank']=pd.to_numeric(z['Rank'].astype(str).str.extract(r'(\d+)')[0],errors='coerce'); z['Symbol']=z['Symbol'].astype(str).str.upper().str.strip(); z['Price']=z['Price'].map(num)
    z=z.dropna(subset=['Rank','Symbol','Price']); z=z[(z.Rank>=1)&(z.Rank<=PRICE_DEPTH)].drop_duplicates('Symbol').sort_values('Rank'); z['date']=dt
