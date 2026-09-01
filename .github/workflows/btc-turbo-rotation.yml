@@ -1,0 +1,26 @@
+name: BTC turbo rotation backtest
+on:
+  push:
+    branches: [btc-turbo-rotation]
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python src/btc_turbo_rotation.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btc-turbo-rotation-results
+          path: |
+            data/btc_turbo_rotation/results.csv
+            data/btc_turbo_rotation/results.json
+            data/btc_turbo_rotation/annual_returns_pct.csv
+            data/btc_turbo_rotation/equity_curves.csv
+            data/btc_turbo_rotation/subperiod_results.csv
+            data/btc_turbo_rotation/weights.csv
