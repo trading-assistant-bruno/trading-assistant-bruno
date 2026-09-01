@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 import crypto_backtest as base
+import crypto_backtest_yahoo as yahoo
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "btc_turbo_rotation"
@@ -65,7 +66,6 @@ def target_weights(close: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     mom56 = close.pct_change(56)
     score = 0.60*mom28 + 0.40*mom56
 
-    # Sunday rebalance signal; next-day implementation via shift below.
     signal_dates = close.index[close.index.dayofweek == 6]
     for dt in signal_dates:
         row = pd.Series(0.0,index=cols)
@@ -83,7 +83,6 @@ def target_weights(close: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
         if bear and cfg.get("riskoff",0)>0:
             row[BTC] = 1.0-cfg["riskoff"]
-            # rest is cash
             w.loc[dt]=row
             continue
 
@@ -110,7 +109,7 @@ def target_weights(close: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         w.loc[dt]=row
 
     w=w.ffill().fillna(0.0)
-    if w.iloc[0].sum()==0:
+    if len(signal_dates):
         w.loc[:signal_dates[0],BTC]=1.0
     return w
 
@@ -118,7 +117,6 @@ def target_weights(close: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 def run_variant(close: pd.DataFrame, cfg: dict):
     target=target_weights(close,cfg)
     live=target.shift(1).fillna(0.0)
-    # before first target exists, default BTC
     zero=live.sum(axis=1)==0
     live.loc[zero,BTC]=1.0
     asset_ret=close.pct_change().fillna(0.0)
@@ -141,7 +139,7 @@ def subperiod(name,r):
 
 
 def main():
-    prices=base.load_prices()
+    prices=yahoo.load_prices_yahoo()
     close=base.align_close(prices).sort_index()
     close=close.loc[close.index>=pd.Timestamp("2018-01-01")]
     if BTC not in close: raise RuntimeError("BTC unavailable")
