@@ -1,0 +1,41 @@
+name: Momentum Burst backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - momentum-burst-backtest
+    paths:
+      - 'src/momentum_burst_backtest.py'
+      - '.github/workflows/momentum-burst-backtest.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: pip install msci-data==1.0.0
+      - run: python src/momentum_burst_backtest.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: momentum-burst-backtest-results
+          path: |
+            data/momentum_burst_backtest/results.csv
+            data/momentum_burst_backtest/results.json
+            data/momentum_burst_backtest/annual_returns_pct.csv
+            data/momentum_burst_backtest/equity_curves.csv
+            data/momentum_burst_backtest/closed_trades.csv
+            data/momentum_burst_backtest/fills.csv
+            data/momentum_burst_backtest/world_burst_blends.csv
+            data/momentum_burst_backtest/weekly_gate_features.csv
+            data/momentum_burst_backtest/universe_coverage.csv
+            data/momentum_burst_backtest/subperiod_results.csv
+            data/momentum_burst_backtest/latest_leader_snapshot.csv
+          if-no-files-found: warn
