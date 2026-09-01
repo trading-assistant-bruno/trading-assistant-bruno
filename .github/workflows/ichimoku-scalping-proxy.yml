@@ -1,0 +1,35 @@
+name: Ichimoku scalping proxy backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - udemy-scalping-backtest
+    paths:
+      - 'src/ichimoku_scalping_proxy.py'
+      - '.github/workflows/ichimoku-scalping-proxy.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: python src/ichimoku_scalping_proxy.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ichimoku-scalping-proxy-results
+          path: |
+            data/ichimoku_scalping_proxy/results.csv
+            data/ichimoku_scalping_proxy/results.json
+            data/ichimoku_scalping_proxy/coverage.csv
+            data/ichimoku_scalping_proxy/aggregate_5bps.csv
+            data/ichimoku_scalping_proxy/trades_5bps.csv
+            data/ichimoku_scalping_proxy/equity_curves_5bps.csv
+          if-no-files-found: warn
