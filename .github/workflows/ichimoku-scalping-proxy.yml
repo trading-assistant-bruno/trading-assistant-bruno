@@ -7,6 +7,7 @@ on:
       - udemy-scalping-backtest
     paths:
       - 'src/ichimoku_scalping_proxy.py'
+      - 'src/ichimoku_scalping_proxy_v2.py'
       - '.github/workflows/ichimoku-scalping-proxy.yml'
 
 jobs:
@@ -20,7 +21,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - run: pip install -r requirements.txt
-      - run: python src/ichimoku_scalping_proxy.py
+      - run: python src/ichimoku_scalping_proxy_v2.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
