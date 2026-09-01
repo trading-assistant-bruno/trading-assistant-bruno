@@ -1,0 +1,26 @@
+name: BTC turbo PIT monthly sensitivity
+on:
+  push:
+    branches: [btc-turbo-point-in-time]
+    paths: ['src/btc_turbo_pit_monthly_sensitivity.py','.github/workflows/btc-turbo-pit-monthly-sensitivity.yml']
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt lxml html5lib
+      - run: python src/btc_turbo_pit_monthly_sensitivity.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btc-turbo-pit-monthly-sensitivity-results
+          path: |
+            data/btc_turbo_pit_monthly_sensitivity/results.csv
+            data/btc_turbo_pit_monthly_sensitivity/results.json
+            data/btc_turbo_pit_monthly_sensitivity/annual.csv
+            data/btc_turbo_pit_monthly_sensitivity/equity.csv
