@@ -1,0 +1,46 @@
+name: BTC turbo stop comparison seeded
+
+on:
+  push:
+    branches: [btc-turbo-point-in-time]
+    paths:
+      - 'src/btc_turbo_stop_test.py'
+      - 'src/btc_turbo_stop_test_seed.py'
+      - '.github/workflows/btc-turbo-stop-test-seeded.yml'
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt lxml html5lib
+      - name: Download validated PIT seed
+        uses: actions/download-artifact@v4
+        with:
+          name: btc-turbo-pit-monthly-results
+          repository: trading-assistant-bruno/trading-assistant-bruno
+          run-id: 33550218516
+          github-token: ${{ github.token }}
+          path: seed
+      - run: python src/btc_turbo_stop_test_seed.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btc-turbo-stop-test-seeded-results
+          path: |
+            data/btc_turbo_stop_test/results.csv
+            data/btc_turbo_stop_test/results.json
+            data/btc_turbo_stop_test/annual.csv
+            data/btc_turbo_stop_test/equity.csv
+            data/btc_turbo_stop_test/trade_log.csv
+            data/btc_turbo_stop_test/signals.csv
+            data/btc_turbo_stop_test/daily_coverage.csv
+            data/btc_turbo_stop_test/missing_daily_paths.csv
+            data/btc_turbo_stop_test/snapshots.csv
+            data/btc_turbo_stop_test/snapshot_failures.csv
+          if-no-files-found: error
