@@ -1,40 +1,40 @@
 {
-  "generated_at": "2026-11-07T01:55:27.964272+01:00",
+  "generated_at": "2026-11-10T04:33:12.758368+01:00",
   "version": "1.4.1",
   "regime": {
     "color": "ROUGE",
-    "score": 10,
+    "score": 30,
     "details": {
       "QQQ": {
-        "close": 656.1,
+        "close": 679.35,
         "above_sma50": false,
         "above_sma200": false,
         "sma50_rising": false
       },
       "SPY": {
-        "close": 735.29,
+        "close": 752.69,
         "above_sma50": false,
         "above_sma200": true,
         "sma50_rising": false
       },
       "^IXIC": {
-        "close": 24579.42,
+        "close": 25253.14,
         "above_sma50": false,
-        "above_sma200": false,
+        "above_sma200": true,
         "sma50_rising": false
       },
       "VIX": {
-        "close": 25.64,
-        "below_limit": false,
+        "close": 19.92,
+        "below_limit": true,
         "limit": 25.0
       }
     },
     "new_positions_allowed": 0
   },
-  "eurusd": 1.1228,
+  "eurusd": 1.1225,
   "spy_returns": {
-    "perf_6m_pct": 0.19,
-    "perf_12m_pct": 9.69
+    "perf_6m_pct": 2.33,
+    "perf_12m_pct": 13.5
   },
   "rs_rank_definition": "Percentile momentum interne 1-99, non équivalent au rating IBD propriétaire",
   "funnel": {
