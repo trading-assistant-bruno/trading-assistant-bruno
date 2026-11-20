@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-11-19T03:32:40.694871+01:00",
+  "generated_at": "2026-11-20T03:18:01.489822+01:00",
   "version": "1.4.1",
   "regime": {
     "color": "ROUGE",
-    "score": 20,
+    "score": 10,
     "details": {
       "QQQ": {
         "close": 659.51,
@@ -18,20 +18,20 @@
         "sma50_rising": false
       },
       "^IXIC": {
-        "close": 24429.88,
+        "close": 23879.2,
         "above_sma50": false,
         "above_sma200": false,
         "sma50_rising": false
       },
       "VIX": {
-        "close": 24.56,
-        "below_limit": true,
+        "close": 28.44,
+        "below_limit": false,
         "limit": 25.0
       }
     },
     "new_positions_allowed": 0
   },
-  "eurusd": 1.097,
+  "eurusd": 1.0967,
   "spy_returns": {
     "perf_6m_pct": -0.99,
     "perf_12m_pct": 10.88
