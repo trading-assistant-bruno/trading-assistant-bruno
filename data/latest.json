@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-26T04:32:44.075606+01:00",
+  "generated_at": "2026-11-27T04:38:01.863067+01:00",
   "version": "1.4.1",
   "regime": {
     "color": "ROUGE",
@@ -24,14 +24,14 @@
         "sma50_rising": false
       },
       "VIX": {
-        "close": 28.29,
+        "close": 26.8,
         "below_limit": false,
         "limit": 25.0
       }
     },
     "new_positions_allowed": 0
   },
-  "eurusd": 1.0965,
+  "eurusd": 1.0983,
   "spy_returns": {
     "perf_6m_pct": -4.54,
     "perf_12m_pct": 8.33
